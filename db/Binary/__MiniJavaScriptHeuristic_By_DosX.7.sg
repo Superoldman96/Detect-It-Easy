@@ -5,7 +5,9 @@
 // GitHub: https://github.com/DosX-dev
 // Telegram: @DosX_dev
 
-function detect() { main(); }
+function detect() {
+    main();
+}
 
 function main() {
     if (Binary.isHeuristicScan()) {
@@ -20,7 +22,10 @@ function main() {
                     options = "bytecode";
                 } else {
                     if (Binary.getSize() > 3000) {
-                        var scriptContent = Binary.getString(0x00, Binary.getSize());
+                        var scriptContent = Binary.getString(
+                            0x00,
+                            Binary.getSize()
+                        );
 
                         // Split the code into segments that are outside of string literals.
                         // Handle escaping (\", \\', \`) — escaped quotes are not treated as string delimiters.
@@ -39,30 +44,49 @@ function main() {
                                     isEscaped = false;
                                     continue;
                                 }
-                                if (currChar === '\\') {
+                                if (currChar === "\\") {
                                     isEscaped = true;
                                     continue;
                                 }
 
                                 // For template literals: when encountering `${` include nested expression into current segment
-                                if (stringDelimiter === '`' && currChar === '$' && i + 1 < scriptContent.length && scriptContent[i + 1] === '{') {
+                                if (
+                                    stringDelimiter === "`" &&
+                                    currChar === "$" &&
+                                    i + 1 < scriptContent.length &&
+                                    scriptContent[i + 1] === "{"
+                                ) {
                                     // skip '{' and start accumulating the expression content
                                     i++; // now scriptContent[i] === '{'
                                     var braceDepth = 1;
                                     // Inside the expression, handle escaping as well
-                                    while (i + 1 < scriptContent.length && braceDepth > 0) {
+                                    while (
+                                        i + 1 < scriptContent.length &&
+                                        braceDepth > 0
+                                    ) {
                                         i++;
                                         var innerChar = scriptContent[i];
-                                        if (innerChar === '\\') {
+                                        if (innerChar === "\\") {
                                             // capture escaped char and the next one
                                             currentSegment += innerChar;
                                             if (i + 1 < scriptContent.length) {
-                                                i++; currentSegment += scriptContent[i];
+                                                i++;
+                                                currentSegment +=
+                                                    scriptContent[i];
                                             }
                                             continue;
                                         }
-                                        if (innerChar === '{') { braceDepth++; currentSegment += innerChar; continue; }
-                                        if (innerChar === '}') { braceDepth--; if (braceDepth === 0) break; currentSegment += innerChar; continue; }
+                                        if (innerChar === "{") {
+                                            braceDepth++;
+                                            currentSegment += innerChar;
+                                            continue;
+                                        }
+                                        if (innerChar === "}") {
+                                            braceDepth--;
+                                            if (braceDepth === 0) break;
+                                            currentSegment += innerChar;
+                                            continue;
+                                        }
                                         currentSegment += innerChar;
                                     }
                                     continue;
@@ -75,9 +99,16 @@ function main() {
                                 // do not copy characters that are inside strings
                             } else {
                                 // not inside a string
-                                if (currChar === '"' || currChar === "'" || currChar === '`') {
+                                if (
+                                    currChar === '"' ||
+                                    currChar === "'" ||
+                                    currChar === "`"
+                                ) {
                                     // start of string — finish current segment
-                                    if (currentSegment.length > 0) { segments.push(currentSegment); currentSegment = String(); }
+                                    if (currentSegment.length > 0) {
+                                        segments.push(currentSegment);
+                                        currentSegment = String();
+                                    }
                                     insideString = true;
                                     stringDelimiter = currChar;
                                 } else {
@@ -86,14 +117,24 @@ function main() {
                             }
                         }
 
-                        if (currentSegment.length > 0) segments.push(currentSegment);
+                        if (currentSegment.length > 0)
+                            segments.push(currentSegment);
 
-                        for (var segIndex = 0; segIndex < segments.length; segIndex++) {
+                        for (
+                            var segIndex = 0;
+                            segIndex < segments.length;
+                            segIndex++
+                        ) {
                             var tokenToProcess = segments[segIndex];
-                            if (!/(  |\t)/.test(tokenToProcess) && (
-                                /(((var|let|const)[\t ]|\())\b[a-zA-Z](?:,[a-zA-Z]){3,}\b/.test(tokenToProcess) ||
-                                /[a-zA-Z][!=]?=?=![01][;,})]/.test(tokenToProcess)
-                            )) {
+                            if (
+                                !/(  |\t)/.test(tokenToProcess) &&
+                                (/(((var|let|const)[\t ]|\())\b[a-zA-Z](?:,[a-zA-Z]){3,}\b/.test(
+                                    tokenToProcess
+                                ) ||
+                                    /[a-zA-Z][!=]?=?=![01][;,})]/.test(
+                                        tokenToProcess
+                                    ))
+                            ) {
                                 options = "minified/compiled";
                                 break;
                             }
@@ -101,7 +142,12 @@ function main() {
                     }
                 }
 
-                _setResult("~language", "JavaScript", String(), Binary.isVerbose() ? options : String());
+                _setResult(
+                    "~language",
+                    "JavaScript",
+                    String(),
+                    Binary.isVerbose() ? options : String()
+                );
 
                 break;
         }

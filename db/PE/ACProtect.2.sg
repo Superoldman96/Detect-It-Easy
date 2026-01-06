@@ -3,7 +3,11 @@
 meta("protector", "ACProtect");
 
 function detect() {
-    if (PE.compareEP("60F950E801000000..58584950E801000000..5858790466B9B872E801000000")) {
+    if (
+        PE.compareEP(
+            "60F950E801000000..58584950E801000000..5858790466B9B872E801000000"
+        )
+    ) {
         sVersion = "1.09g";
     } else if (PE.compareEP("E801000000..83")) {
         sVersion = "1.41";
@@ -18,7 +22,7 @@ function detect() {
     } else {
         var perplexSection = PE.section[".perplex"];
 
-        if (perplexSection && (perplexSection.Characteristics & 0xe0000060)) {
+        if (perplexSection && perplexSection.Characteristics & 0xe0000060) {
             sVersion = "1.X";
         }
     }

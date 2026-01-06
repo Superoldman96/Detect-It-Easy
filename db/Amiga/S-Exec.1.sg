@@ -4,7 +4,9 @@
 meta("cruncher", "S-Exec");
 
 function detect() {
-    if (Amiga.compareEP("48e7fffe207a....d1c8d1c858..2f0854..4e55....20080680")) {
+    if (
+        Amiga.compareEP("48e7fffe207a....d1c8d1c858..2f0854..4e55....20080680")
+    ) {
         sVersion = "1.1";
         sOptions = "by Chas Wyndham";
         bDetected = true;

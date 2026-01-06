@@ -37,8 +37,12 @@ function detect() {
     } else if (Binary.compare("00069a") || Binary.compare("0006d2")) {
         bDetected = true;
         sName = "DCL";
-    } else if (Binary.compare("....'-lh'..2d") || Binary.compare("....'-lz'..2d") || Binary.compare("....'-pm'..2d")) {
-        sVersion = Binary.getString(2, 5)
+    } else if (
+        Binary.compare("....'-lh'..2d") ||
+        Binary.compare("....'-lz'..2d") ||
+        Binary.compare("....'-pm'..2d")
+    ) {
+        sVersion = Binary.getString(2, 5);
         bDetected = true;
         switch (Binary.getString(3, 3)) {
             case "lh0":
@@ -63,7 +67,7 @@ function detect() {
                 break;
             case "lhx":
                 sName = "LHA";
-                sOptions = "UNLHA32 ext (.LHA)"
+                sOptions = "UNLHA32 ext (.LHA)";
                 break;
             case "lzs":
             case "lz2":
@@ -76,7 +80,7 @@ function detect() {
                 sName = "LHA ";
                 sOptions = "LArc ext (.LZS)";
                 break;
-                case "lz7":
+            case "lz7":
             case "pm0":
             case "pm2":
                 sName = "LHA archive, PMarc ext (.PMA)";
@@ -107,7 +111,11 @@ function detect() {
         } else if (Binary.compare("1f1e", arch_offset)) {
             sName = "PACK 2";
         }
-    } else if (Binary.compare("0001000401000100010000000000000000000000000000000000000000000000010101")) {
+    } else if (
+        Binary.compare(
+            "0001000401000100010000000000000000000000000000000000000000000000010101"
+        )
+    ) {
         bDetected = true;
         sName = "VMS SaveSet";
     } else if (Binary.compare("'ZOO'............'Archive'")) {
@@ -116,7 +124,9 @@ function detect() {
     } else if (Binary.compare("602213636c00")) {
         bDetected = true;
         sName = "Asymetrix";
-    } else if (Binary.compare("453dcd28........................'Compressed ROMFS'")) {
+    } else if (
+        Binary.compare("453dcd28........................'Compressed ROMFS'")
+    ) {
         bDetected = true;
         sName = "CRAMFS";
     } else if (Binary.compare("'IsZ!@'01")) {
@@ -148,7 +158,9 @@ function detect() {
     } else if (Binary.compare("'BIGF'00")) {
         bDetected = true;
         sName = "BIGF";
-    } else if (Binary.compare("01ca'Copyright (c) Genus Microprogramming, Inc.'")) {
+    } else if (
+        Binary.compare("01ca'Copyright (c) Genus Microprogramming, Inc.'")
+    ) {
         bDetected = true;
         sName = "GXL";
     } else if (Binary.compare("0100......00ecf9")) {
@@ -160,11 +172,11 @@ function detect() {
     } else if (Binary.compare("135d658c3a010200")) {
         bDetected = true;
         sName = "InstallShield";
-        sVersion = "3.x"
+        sVersion = "3.x";
     } else if (Binary.compare("2aab79d800010000")) {
         bDetected = true;
         sName = "InstallShield INST";
-        sVersion = "3.x"
+        sVersion = "3.x";
     } else if (Binary.compare("'SZDD'88")) {
         bDetected = true;
         sName = "SZDD";
@@ -187,16 +199,24 @@ function detect() {
     } else if (Binary.compare("'PACK'............0000")) {
         bDetected = true;
         sName = "PACK";
-    } else if (Binary.compare("'PACK'") && File.read_uint32(4, _BE) > 0 && File.read_uint32(4, _BE) <= 3) {
+    } else if (
+        Binary.compare("'PACK'") &&
+        File.read_uint32(4, _BE) > 0 &&
+        File.read_uint32(4, _BE) <= 3
+    ) {
         bDetected = true;
         sName = "Packed git objects (.pack)";
         sVersion = "v" + File.read_uint32(4, _BE);
-        sOptions = File.read_uint32(8, _BE) + " object(s)"
+        sOptions = File.read_uint32(8, _BE) + " object(s)";
     } else if (Binary.compare("FF'tOc'00000002")) {
         sName = "Index of packed git objects (.idx)";
         sVersion = "v" + File.read_uint32(4, _BE);
-        bDetected = 1
-    } else if (Binary.compare("'RIDX'00000001") && File.read_uint32(8, _BE) > 0 && File.read_uint32(8, _BE) <= 2) {
+        bDetected = 1;
+    } else if (
+        Binary.compare("'RIDX'00000001") &&
+        File.read_uint32(8, _BE) > 0 &&
+        File.read_uint32(8, _BE) <= 2
+    ) {
         sName = "Reverse index of packed git objects (.rev)";
         sVersion = "v1";
         bDetected = true;
@@ -240,7 +260,7 @@ function detect() {
     } else if (Binary.compare("74c42c84e1e5d428")) {
         bDetected = true;
         sName = "InstallShield INX";
-        sVersion = "7.x"
+        sVersion = "7.x";
     } else if (Binary.compare("5d0000....ffffffffffffffff00180ddd04")) {
         bDetected = true;
         sName = "LZMA";
@@ -268,7 +288,7 @@ function detect() {
         if (File.getSize() < 3 || !File.compare("1F9D")) return false;
         t = File.read_uint8(2);
         sversion = t & 0x80 ? "new" : "old";
-        t &= 0x7F;
+        t &= 0x7f;
         if (t < 9 || t > 16) return false;
         return true;
     }
@@ -278,44 +298,52 @@ function detect() {
             sVersion = sversion;
             bDetected = true;
         } else if (Binary.compare("'LZK00'000000")) {
-        bDetected = true;
-        sName = "LZK00";
-    } else if (Binary.compare("032401010100")) {
-        bDetected = true;
-        sName = "WPK";
-    } else if (Binary.compare("'TPWM'")) {
-        bDetected = true;
-        sName = "TPWM (BlueByte)";
-    } else if ((Binary.getSize() >= 500) && (Binary.compare("00'ustar'", 0x100))) {
-        bDetected = true;
-        sName = "tar";
-    } else if (Binary.compare("'LB'0100")) {
-        bDetected = true;
-        sName = "XFL game resource file (.XFL)";
-        sVersion = "v1.0";
-        sOptions = sOptions.append(Binary.getString(12, 32));
-        sOptions = sOptions.append("& other " + (Binary.readDword(8) - 1) + " files");
-    } else if (Binary.compare("FF060000'sNaPpY'")) {
-        bDetected = true;
-        sName = "Snappy compressed data (.SZ)";
-    } else if (Binary.compare("'blkzip'00")) {
-        bDetected = true;
-        sName = "BulkZip (.BULK)";
-    } else if (Binary.compare("AE01'NanoZip 0.09 alpha'")) {
-        bDetected = true;
-        sName = "NanoZip (.NZ)";
-        sVersion = "0.09 alpha";
-    } else if (Binary.compare("'CM'2805060000")) {
-        bDetected = true;
-        sName = "RAZOR (.RZ)";
-        sOptions = "by Christian Martelock"
-    } else if (Binary.compare("28B52FFD")) {
-        bDetected = true;
-        sName = "Facebook Zstandard/ZSTD compressed data (.ZST)";
-    } else if (Binary.compare("00'APPL'", 0x40) && Binary.compare("00008181", 0x78)) {
-        bDetected = true;
-        sName = "MacBinary";
-    }
+            bDetected = true;
+            sName = "LZK00";
+        } else if (Binary.compare("032401010100")) {
+            bDetected = true;
+            sName = "WPK";
+        } else if (Binary.compare("'TPWM'")) {
+            bDetected = true;
+            sName = "TPWM (BlueByte)";
+        } else if (
+            Binary.getSize() >= 500 &&
+            Binary.compare("00'ustar'", 0x100)
+        ) {
+            bDetected = true;
+            sName = "tar";
+        } else if (Binary.compare("'LB'0100")) {
+            bDetected = true;
+            sName = "XFL game resource file (.XFL)";
+            sVersion = "v1.0";
+            sOptions = sOptions.append(Binary.getString(12, 32));
+            sOptions = sOptions.append(
+                "& other " + (Binary.readDword(8) - 1) + " files"
+            );
+        } else if (Binary.compare("FF060000'sNaPpY'")) {
+            bDetected = true;
+            sName = "Snappy compressed data (.SZ)";
+        } else if (Binary.compare("'blkzip'00")) {
+            bDetected = true;
+            sName = "BulkZip (.BULK)";
+        } else if (Binary.compare("AE01'NanoZip 0.09 alpha'")) {
+            bDetected = true;
+            sName = "NanoZip (.NZ)";
+            sVersion = "0.09 alpha";
+        } else if (Binary.compare("'CM'2805060000")) {
+            bDetected = true;
+            sName = "RAZOR (.RZ)";
+            sOptions = "by Christian Martelock";
+        } else if (Binary.compare("28B52FFD")) {
+            bDetected = true;
+            sName = "Facebook Zstandard/ZSTD compressed data (.ZST)";
+        } else if (
+            Binary.compare("00'APPL'", 0x40) &&
+            Binary.compare("00008181", 0x78)
+        ) {
+            bDetected = true;
+            sName = "MacBinary";
+        }
 
     return result();
 }

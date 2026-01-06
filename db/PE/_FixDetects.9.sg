@@ -6,26 +6,29 @@
 function detect() {
     removeFalsePositive({
         falsePositive: { packer: "AHpacker" },
-        ifPresents: { packer: "ExE Pack" }
+        ifPresents: { packer: "ExE Pack" },
     });
 
     removeFalsePositive({
         falsePositive: { linker: "Turbo Linker" },
-        ifPresents: { linker: "Microsoft Linker" }
+        ifPresents: { linker: "Microsoft Linker" },
     });
 
     removeFalsePositive({
         falsePositive: { tool: "Borland Delphi" },
-        ifPresents: { tool: "Microsoft Linker" }
+        ifPresents: { tool: "Microsoft Linker" },
     });
 
     removeFalsePositive({
         falsePositive: { compiler: "FASM", language: "ASMx86" },
-        ifPresents: { packer: "Simple Pack" }
+        ifPresents: { packer: "Simple Pack" },
     });
 
     // Number of "compiler" more than 1? Remove Visual C++.
-    if (_isResultPresent("compiler", "Microsoft Visual C/C++") && _getNumberOfResults("compiler") > 1) {
+    if (
+        _isResultPresent("compiler", "Microsoft Visual C/C++") &&
+        _getNumberOfResults("compiler") > 1
+    ) {
         _removeResult("compiler", "Microsoft Visual C/C++");
 
         if (_getNumberOfResults("language") > 1 && _isLangPresent("C/C++")) {
@@ -34,14 +37,16 @@ function detect() {
     }
 
     // Visual Studio? -> C#
-    if (_isLangPresent("MSIL/C#") && _isResultPresent("tool", "Microsoft Visual Studio")) {
+    if (
+        _isLangPresent("MSIL/C#") &&
+        _isResultPresent("tool", "Microsoft Visual Studio")
+    ) {
         _removeResult("language", "MSIL/C#");
         _setLang("C#");
     }
 }
 
 function removeFalsePositive(data) {
-
     var falsePositive = data.falsePositive,
         ifPresents = data.ifPresents;
 
@@ -67,7 +72,10 @@ function removeFalsePositive(data) {
         }
     }
 
-    if (_isResultPresent(falsePositiveKey, falsePositiveValue) && _isResultPresent(ifPresentsKey, ifPresentsValue)) {
+    if (
+        _isResultPresent(falsePositiveKey, falsePositiveValue) &&
+        _isResultPresent(ifPresentsKey, ifPresentsValue)
+    ) {
         _removeResult(falsePositiveKey, falsePositiveValue);
     }
 }

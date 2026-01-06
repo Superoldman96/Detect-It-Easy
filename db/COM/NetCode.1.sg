@@ -4,7 +4,11 @@
 meta("converter", "NetCode");
 
 function detect() {
-    if (Binary.compare("'T_OOWW3=XXWX5 2PY5w3P_-l.P-KD1Ep-OLPZ-pJP-pw40PQX5fsPu'")) {
+    if (
+        Binary.compare(
+            "'T_OOWW3=XXWX5 2PY5w3P_-l.P-KD1Ep-OLPZ-pJP-pw40PQX5fsPu'"
+        )
+    ) {
         sVersion = "1.11";
         sOptions = "by JauMing Tseng //Nide";
         bDetected = true;

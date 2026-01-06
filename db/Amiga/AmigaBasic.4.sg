@@ -4,7 +4,11 @@
 meta("compiler", "AmigaBasic");
 
 function detect() {
-    if (Amiga.compareEP("23c0........23c8........200f48e77efe2a402c79........23ce........23cf")) {
+    if (
+        Amiga.compareEP(
+            "23c0........23c8........200f48e77efe2a402c79........23ce........23cf"
+        )
+    ) {
         bDetected = true;
     }
 

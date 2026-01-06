@@ -27,7 +27,9 @@ function detect() {
     } else if (PE.compareEP("60906161807FF04590600F851B8B1FFF68")) {
         sVersion = "1.6d";
         bDetected = true;
-    } else if (PE.compareEP("F7D183F1FF6A00F7D183F1FF810424........F7D183F1FF")) {
+    } else if (
+        PE.compareEP("F7D183F1FF6A00F7D183F1FF810424........F7D183F1FF")
+    ) {
         if (PE.compareEP("E8", 24)) {
             sOptions = "Hide EP";
         }

@@ -15,9 +15,17 @@ function detect() {
                 }
             }
         }
-    } else if (MSDOS.compareEP("e8$$$$558bec5053515256571e06fc8cc88ed8e8....bf....8845..8c")) {
+    } else if (
+        MSDOS.compareEP(
+            "e8$$$$558bec5053515256571e06fc8cc88ed8e8....bf....8845..8c"
+        )
+    ) {
         bDetected = true;
-    } else if (MSDOS.compareEP("e8$$$$1e06fc8cc88ed8e8....bf....8845..8c1e....c41e....891d")) {
+    } else if (
+        MSDOS.compareEP(
+            "e8$$$$1e06fc8cc88ed8e8....bf....8845..8c1e....c41e....891d"
+        )
+    ) {
         bDetected = true;
     }
 

@@ -4,7 +4,11 @@
 meta("other", "AutoHack addition");
 
 function detect() {
-    if (MSDOS.compareEP("0e1fb409ba....cd21fa8e06....be....8b0e....83f9..74..fdd1e1")) {
+    if (
+        MSDOS.compareEP(
+            "0e1fb409ba....cd21fa8e06....be....8b0e....83f9..74..fdd1e1"
+        )
+    ) {
         bDetected = true;
     }
 

@@ -9,7 +9,10 @@
 meta("library", "OpenIddict");
 
 function detect() {
-    if (PE.isNetObjectPresent("OpenIddict.Client") || PE.isNetObjectPresent("OpenIddict.Abstractions")) {
+    if (
+        PE.isNetObjectPresent("OpenIddict.Client") ||
+        PE.isNetObjectPresent("OpenIddict.Abstractions")
+    ) {
         bDetected = true;
     }
 

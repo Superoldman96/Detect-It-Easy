@@ -9,7 +9,10 @@
 meta("library", "NUnit");
 
 function detect() {
-    if (PE.isNetObjectPresent("NUnit") || PE.isNetObjectPresent("nunit.framework")) {
+    if (
+        PE.isNetObjectPresent("NUnit") ||
+        PE.isNetObjectPresent("nunit.framework")
+    ) {
         bDetected = true;
     }
 

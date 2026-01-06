@@ -31,7 +31,7 @@ function getPerlVersion() {
         "'erl5' %% '.dll'", // v5.X
         "'erl5' %% %% '.dll'", // v5.XX
         "'erl5_' %% '.dll'", // cygwin or msys
-        "'erl5_' %% %% '.dll'"
+        "'erl5_' %% %% '.dll'",
     ];
 
     var nExp = PE.getExportSection(),
@@ -40,7 +40,11 @@ function getPerlVersion() {
         nGot = -1;
 
     for (var i = 0; i < verSig.length; ++i) {
-        nGot = PE.findSignature(PE.section[nExp].FileOffset, PE.getSize(), verSig[i]);
+        nGot = PE.findSignature(
+            PE.section[nExp].FileOffset,
+            PE.getSize(),
+            verSig[i]
+        );
         if (nGot > -1) break;
     }
 

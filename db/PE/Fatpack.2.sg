@@ -10,10 +10,16 @@ meta("packer", "Fatpack");
 
 function detect() {
     if (!PE.isNet() && PE.is64() && PE.isTLSPresent()) {
-        if (PE.getNumberOfImports() === 1 && PE.isImportPositionHashPresent(0, 0x74244911)) {
+        if (
+            PE.getNumberOfImports() === 1 &&
+            PE.isImportPositionHashPresent(0, 0x74244911)
+        ) {
             bDetected = true;
 
-            if (PE.getNumberOfSections() === 6 && PE.getNumberOfResources() > 0) {
+            if (
+                PE.getNumberOfSections() === 6 &&
+                PE.getNumberOfResources() > 0
+            ) {
                 sOptions = "resources payload";
 
                 if (!PE.isResourceNamePresent("FPACK")) {

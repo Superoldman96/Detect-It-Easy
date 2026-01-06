@@ -4,7 +4,11 @@
 meta("self-displayer", "Graphic WorkShop");
 
 function detect() {
-    if (MSDOS.compareEP("e9$$$$2ec706........b8....a9....74..25....bb....2bd8432e011e....e8")) {
+    if (
+        MSDOS.compareEP(
+            "e9$$$$2ec706........b8....a9....74..25....bb....2bd8432e011e....e8"
+        )
+    ) {
         sVersion = "6.0-7.1";
         sOptions = "by Alchemy Mindworks Inc.";
         bDetected = true;

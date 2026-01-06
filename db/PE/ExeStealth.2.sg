@@ -39,7 +39,10 @@ function detect() {
 
     var tnResource = PE.resource["TN"];
     if (!bDetected && tnResource) {
-        if (PE.compare("'MZ'", tnResource.FileOffset) || PE.isSectionNamePresent("ExeS")) {
+        if (
+            PE.compare("'MZ'", tnResource.FileOffset) ||
+            PE.isSectionNamePresent("ExeS")
+        ) {
             bDetected = true;
         }
     }

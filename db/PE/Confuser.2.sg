@@ -6,7 +6,11 @@ meta("protector", "Confuser");
 function getConfuserVersion() {
     var sResult = String();
 
-    var nVersionOffset = PE.findString(PE.section[0].FileOffset, PE.section[0].FileSize, "Confuser v");
+    var nVersionOffset = PE.findString(
+        PE.section[0].FileOffset,
+        PE.section[0].FileSize,
+        "Confuser v"
+    );
     if (nVersionOffset !== -1) {
         sResult = PE.getString(nVersionOffset + 10);
     }
@@ -26,7 +30,11 @@ function detect() {
         bDetected = true;
     } else if (PE.isNet()) {
         if (PE.section.length >= 2) {
-            var nVersionOffset = PE.findString(PE.section[1].FileOffset, PE.section[1].FileSize, "ConfuserEx v");
+            var nVersionOffset = PE.findString(
+                PE.section[1].FileOffset,
+                PE.section[1].FileSize,
+                "ConfuserEx v"
+            );
             if (nVersionOffset != -1) {
                 sVersion = PE.getString(nVersionOffset + 12, 7);
                 sName = "ConfuserEx";
@@ -39,7 +47,10 @@ function detect() {
         sName = "ConfuserEx";
         sVersion = "Bed's mod";
         bDetected = true;
-    } else if (bDetected && PE.isNetObjectPresent("DotNetPatcherPackerAttribute")) {
+    } else if (
+        bDetected &&
+        PE.isNetObjectPresent("DotNetPatcherPackerAttribute")
+    ) {
         sName = "ConfuserEx";
         sVersion = "DotNetPatcher mod";
         bDetected = true;

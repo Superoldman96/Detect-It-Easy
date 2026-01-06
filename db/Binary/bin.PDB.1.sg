@@ -14,7 +14,9 @@ function detect() {
     if (Binary.compare("'BSJB'0100")) {
         sVersion = "1.0";
         bDetected = true;
-    } else if (Binary.compare("'Microsoft C/C++ program database 2.00\r\n\'1A4A470000")) {
+    } else if (
+        Binary.compare("'Microsoft C/C++ program database 2.00\r\n\'1A4A470000")
+    ) {
         sVersion = "2.0";
         bDetected = true;
     } else if (Binary.compare("'Microsoft C/C++ MSF 7.00\r\n'1A4453000000")) {
@@ -27,7 +29,7 @@ function detect() {
             "'$'11'@P:Microsoft.VisualBasic'00": "VB.NET",
             "%%%%%%%%%%'.cs'00": "C#",
             "'$'11'@P:FSharp.Core'00": "F#",
-            "'std::'%%%%%%": "C++"
+            "'std::'%%%%%%": "C++",
             // todo
         };
 

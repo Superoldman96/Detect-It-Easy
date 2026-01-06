@@ -13,9 +13,11 @@ function detect() {
         }
 
         // fake signatures
-        if (bDetected &&
+        if (
+            bDetected &&
             PE.isNetObjectPresent("BabelAttribute") &&
-            PE.isNetObjectPresent("BabelObfuscatorAttribute")) {
+            PE.isNetObjectPresent("BabelObfuscatorAttribute")
+        ) {
             bDetected = false;
         }
     }

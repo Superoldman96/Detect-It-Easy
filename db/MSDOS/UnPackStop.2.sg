@@ -4,7 +4,11 @@
 meta("protector", "UnPackStop");
 
 function detect() {
-    if (MSDOS.compareEP("3670..b8....81c0....bb....43e8....5f83c7..0e570656cbbe....eb")) {
+    if (
+        MSDOS.compareEP(
+            "3670..b8....81c0....bb....43e8....5f83c7..0e570656cbbe....eb"
+        )
+    ) {
         sVersion = "0.9X";
         sOptions = "by Szaszi (Szabo Laszlo)";
         bDetected = true;
@@ -19,11 +23,17 @@ function detect() {
             sOptions = "by Szaszi (Szabo Laszlo)";
             bDetected = true;
         }
-    } else if (MSDOS.compareEP("4e46555dbb....70..b8....81c0....4c44cd213efc268b2e....8ec5")) {
+    } else if (
+        MSDOS.compareEP(
+            "4e46555dbb....70..b8....81c0....4c44cd213efc268b2e....8ec5"
+        )
+    ) {
         sVersion = "0.94";
         sOptions = "by Szaszi (Szabo Laszlo)";
         bDetected = true;
-    } else if (MSDOS.compareEP("b8....40bb....4be8$$$$be....eb$$5f83c7..0e570656cb")) {
+    } else if (
+        MSDOS.compareEP("b8....40bb....4be8$$$$be....eb$$5f83c7..0e570656cb")
+    ) {
         sVersion = "0.94";
         sOptions = "by Szaszi (Szabo Laszlo)";
         bDetected = true;

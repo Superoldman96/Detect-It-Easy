@@ -8,7 +8,9 @@ function detect() {
         sVersion = "1.01";
         sOptions = "1992 by Stroyprogress Ltd.";
         bDetected = true;
-    } else if (Binary.compare("8b26....8bec83ed..e9$$$$e8$$$$87ec5687ec5eadffe0")) {
+    } else if (
+        Binary.compare("8b26....8bec83ed..e9$$$$e8$$$$87ec5687ec5eadffe0")
+    ) {
         sVersion = "1.5";
         sOptions = "1993";
         bDetected = true;

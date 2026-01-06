@@ -4,7 +4,11 @@
 meta("cruncher", "AddressHead");
 
 function detect() {
-    if (Amiga.compareEP("41fa....20080680........43fa....2340....43f9........203c")) {
+    if (
+        Amiga.compareEP(
+            "41fa....20080680........43fa....2340....43f9........203c"
+        )
+    ) {
         bDetected = true;
     }
 

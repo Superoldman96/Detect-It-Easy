@@ -4,7 +4,11 @@
 meta("packer", "WordPerfect EXEPack");
 
 function detect() {
-    if (MSDOS.compareEP("958cc005....0e1fa3....0306....8ec08b0e....8bf94f8bf7fdf3a48b16....50b8....50cb")) {
+    if (
+        MSDOS.compareEP(
+            "958cc005....0e1fa3....0306....8ec08b0e....8bf94f8bf7fdf3a48b16....50b8....50cb"
+        )
+    ) {
         bDetected = true;
     }
 

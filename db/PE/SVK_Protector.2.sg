@@ -3,7 +3,11 @@
 meta("protector", "SVK Protector");
 
 function detect() {
-    if (PE.compareEP("60EB03C784E8EB03C7849AE8000000005D81ED10000000EB03C784E964A023000000EB")) {
+    if (
+        PE.compareEP(
+            "60EB03C784E8EB03C7849AE8000000005D81ED10000000EB03C784E964A023000000EB"
+        )
+    ) {
         sVersion = "1.051";
         bDetected = true;
     } else if (PE.compareEP("60E8........5D81ED06......64A023")) {

@@ -7,7 +7,10 @@
 // Telegram: @DosX_dev
 
 function _isLangPresent(languageName) {
-    return _isResultPresent("language", languageName) || _isResultPresent("~language", languageName);
+    return (
+        _isResultPresent("language", languageName) ||
+        _isResultPresent("~language", languageName)
+    );
 }
 
 function _isLangDetected() {
@@ -16,12 +19,18 @@ function _isLangDetected() {
 
 function _setLang(languageName, version) {
     // if "C/C++" already detected
-    if (_isLangPresent("C/C++") && (languageName == "C" || languageName == "C++")) {
+    if (
+        _isLangPresent("C/C++") &&
+        (languageName == "C" || languageName == "C++")
+    ) {
         _removeResult("language", "C/C++");
     }
 
     // if "C" or "C++"" detected
-    if (languageName == "C/C++" && (_isLangPresent("C") || _isLangPresent("C++"))) {
+    if (
+        languageName == "C/C++" &&
+        (_isLangPresent("C") || _isLangPresent("C++"))
+    ) {
         return null;
     }
 
@@ -36,14 +45,23 @@ function _setLang(languageName, version) {
     }
 
     // If the language already detected
-    if (_isLangDetected() && (languageName == "C/C++" || languageName == "C++" || languageName == "C")) {
+    if (
+        _isLangDetected() &&
+        (languageName == "C/C++" ||
+            languageName == "C++" ||
+            languageName == "C")
+    ) {
         return null;
     }
 
     if (File.isVerbose() && !_isLangPresent(languageName)) {
-        var isHeurResult = (version == "HEUR");
+        var isHeurResult = version == "HEUR";
 
-        _setResult((isHeurResult ? "~" : "") + "language", languageName, (version && !isHeurResult ? version : ""), "");
+        _setResult(
+            (isHeurResult ? "~" : "") + "language",
+            languageName,
+            version && !isHeurResult ? version : "",
+            ""
+        );
     }
-
 }

@@ -8,7 +8,10 @@
 meta("library", "Chromium WebView");
 
 function detect() {
-    if (PE.isLibraryPresent("chrome_elf.dll") || PE.isSectionNamePresent("CPADinfo")) {
+    if (
+        PE.isLibraryPresent("chrome_elf.dll") ||
+        PE.isSectionNamePresent("CPADinfo")
+    ) {
         bDetected = true;
     }
 

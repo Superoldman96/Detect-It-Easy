@@ -4,7 +4,11 @@
 meta("sfx", "ICE SFX");
 
 function detect() {
-    if (MSDOS.compareEP("eb$$be....8bfe8b0e....8b16....b8....50fcad33c2ab8bd0e2")) {
+    if (
+        MSDOS.compareEP(
+            "eb$$be....8bfe8b0e....8b16....b8....50fcad33c2ab8bd0e2"
+        )
+    ) {
         sVersion = "1.0";
         bDetected = true;
     }

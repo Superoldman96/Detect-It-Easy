@@ -8,7 +8,10 @@
 meta("library", "MemoryPack Serializer");
 
 function detect() {
-    if (PE.isNetObjectPresent("MemoryPack") && PE.isNetObjectPresent("MemoryPack.Core")) {
+    if (
+        PE.isNetObjectPresent("MemoryPack") &&
+        PE.isNetObjectPresent("MemoryPack.Core")
+    ) {
         bDetected = true;
     }
 

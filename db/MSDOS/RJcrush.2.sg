@@ -3,7 +3,11 @@
 meta("packer", "RJcrush");
 
 function detect() {
-    if (MSDOS.compareEP("06FC8CC8BA....03D052BA....52BA....03C28BD805....8EDB8EC033F633FFB9")) {
+    if (
+        MSDOS.compareEP(
+            "06FC8CC8BA....03D052BA....52BA....03C28BD805....8EDB8EC033F633FFB9"
+        )
+    ) {
         sVersion = "1.00";
         bDetected = true;
     }

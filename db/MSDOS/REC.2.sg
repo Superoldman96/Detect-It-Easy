@@ -4,10 +4,18 @@
 meta("protector", "REC");
 
 function detect() {
-    if (MSDOS.compareEP("061eb430cd213c..73..33c00650cbbf....8b36....2bf781fe....eb$$52ba....5aeb")) {
+    if (
+        MSDOS.compareEP(
+            "061eb430cd213c..73..33c00650cbbf....8b36....2bf781fe....eb$$52ba....5aeb"
+        )
+    ) {
         sVersion = "0.33-0.35";
         bDetected = true;
-    } else if (MSDOS.compareEP("061e52b8....1ecd2186e03d....73..cd200e1fb4..e8$$$$5acd21")) {
+    } else if (
+        MSDOS.compareEP(
+            "061e52b8....1ecd2186e03d....73..cd200e1fb4..e8$$$$5acd21"
+        )
+    ) {
         sVersion = "0.24-0.32";
         bDetected = true;
     } else if (MSDOS.compareEP("061eb430cd213c..73..33c00650cb")) {

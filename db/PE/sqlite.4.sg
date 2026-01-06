@@ -29,7 +29,9 @@ function detect() {
             }
 
             bDetected = true;
-        } else if (PE.isLibraryPresentExp(/sqlite|sqlmin|sqllang|sqltses|sqldk/i)) {
+        } else if (
+            PE.isLibraryPresentExp(/sqlite|sqlmin|sqllang|sqltses|sqldk/i)
+        ) {
             bDetected = true;
         }
     }

@@ -8,11 +8,19 @@ function detect() {
         sVersion = "1.02";
         sOptions = "1988 by Graeme W. McRae";
         bDetected = true;
-    } else if (Binary.compare("bb....b44acd2181eb....73..ba....b9....e9$$$$0e1fb440bb....cd21b8....cd21")) {
+    } else if (
+        Binary.compare(
+            "bb....b44acd2181eb....73..ba....b9....e9$$$$0e1fb440bb....cd21b8....cd21"
+        )
+    ) {
         sVersion = "1.00";
         sOptions = "1988 by Graeme W. McRae";
         bDetected = true;
-    } else if (Binary.compare("bb....b44acd2181eb....73..ba....b9....e9$$$$b440bb....cd21b8....cd21")) {
+    } else if (
+        Binary.compare(
+            "bb....b44acd2181eb....73..ba....b9....e9$$$$b440bb....cd21b8....cd21"
+        )
+    ) {
         sVersion = "1.01";
         sOptions = "1988 by Graeme W. McRae";
         bDetected = true;

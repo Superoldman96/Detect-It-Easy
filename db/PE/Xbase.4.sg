@@ -11,7 +11,11 @@ function detect() {
     var xppSection = PE.section[".xpp"];
 
     if (xppSection) {
-        bDetected = PE.findString(xppSection.FileOffset, xppSection.FileSize, "XBPEXCEPTION");
+        bDetected = PE.findString(
+            xppSection.FileOffset,
+            xppSection.FileSize,
+            "XBPEXCEPTION"
+        );
     }
 
     if (PE.isLibraryPresent("XBTBase1.dll")) {

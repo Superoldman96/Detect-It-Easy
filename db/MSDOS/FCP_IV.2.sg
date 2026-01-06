@@ -4,7 +4,10 @@
 meta("packer", "protector");
 
 function detect() {
-    if (MSDOS.compareEP("bc....c3") && MSDOS.compare("'FCP/IV'", MSDOS.getEntryPointOffset() - 6)) {
+    if (
+        MSDOS.compareEP("bc....c3") &&
+        MSDOS.compare("'FCP/IV'", MSDOS.getEntryPointOffset() - 6)
+    ) {
         sOptions = "by FCP/IV";
         bDetected = true;
     }

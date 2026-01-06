@@ -5,7 +5,11 @@
 meta("audio", "Human Machine Interfaces");
 
 function detect() {
-    if (Binary.compare("'HMI-MIDISONG061595'0000000000000000000000000000000000000000ff00ffffffffff01")) {
+    if (
+        Binary.compare(
+            "'HMI-MIDISONG061595'0000000000000000000000000000000000000000ff00ffffffffff01"
+        )
+    ) {
         sVersion = "2.0";
         sOptions = "MIDI";
         bDetected = true;

@@ -7,7 +7,10 @@
 var bFPC;
 if (typeof bFPC === "undefined" && typeof PE !== "undefined") {
     if (PE.section[".data"]) {
-        var nOffset = PE.section[".data"].FileOffset + PE.section[".data"].FileSize - 0x1024;
+        var nOffset =
+            PE.section[".data"].FileOffset +
+            PE.section[".data"].FileSize -
+            0x1024;
 
         bFPC = PE.findString(nOffset, 0x1024, "FPC ") != -1;
     }

@@ -73,14 +73,13 @@ function detect() {
             bDetected = true;
             for (i = 0; i < VersionHash.length; i++) {
                 if (Binary.compare(VersionHash[i][1], 0x04)) {
-                    sVersion = "v" + VersionHash[i][0] + " x86"
+                    sVersion = "v" + VersionHash[i][0] + " x86";
                 } else if (Binary.compare(VersionHash[i][2], 0x04)) {
-                    sVersion = "v" + VersionHash[i][0] + " x64"
-                };
+                    sVersion = "v" + VersionHash[i][0] + " x64";
+                }
             }
         }
     }
-
 
     sLang = "JavaScript";
 

@@ -4,7 +4,9 @@
 meta("cryptor", "Shadow COM encryptor");
 
 function detect() {
-    if (Binary.compare("e9$$$$b9....bb....be....bf....ad33c3ab86dff7d3e2..68")) {
+    if (
+        Binary.compare("e9$$$$b9....bb....be....bf....ad33c3ab86dff7d3e2..68")
+    ) {
         sVersion = "1.0";
         sOptions = "by Tailgunner";
         bDetected = true;

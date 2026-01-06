@@ -9,7 +9,10 @@
 meta("library", "OpenTelemetry");
 
 function detect() {
-    if (PE.isNetObjectPresent("OpenTelemetry") || PE.isNetObjectPresent("OpenTelemetry.Api")) {
+    if (
+        PE.isNetObjectPresent("OpenTelemetry") ||
+        PE.isNetObjectPresent("OpenTelemetry.Api")
+    ) {
         bDetected = true;
     }
 

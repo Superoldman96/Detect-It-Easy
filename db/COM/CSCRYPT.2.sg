@@ -4,7 +4,11 @@
 meta("cryptor", "CSCRYPT");
 
 function detect() {
-    if (Binary.compare("e9$$$$e8000059eb$$cceb$$e4..bb....ba....eb$$81eb....0c..2bcb")) {
+    if (
+        Binary.compare(
+            "e9$$$$e8000059eb$$cceb$$e4..bb....ba....eb$$81eb....0c..2bcb"
+        )
+    ) {
         sVersion = "3.30";
         sOptions = "by Christian Schwarz";
         bDetected = true;

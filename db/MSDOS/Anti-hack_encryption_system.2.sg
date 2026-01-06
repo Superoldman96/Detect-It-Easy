@@ -4,7 +4,11 @@
 meta("protector", "Anti-hack encryption system");
 
 function detect() {
-    if (MSDOS.compareEP("eb$$bd....33c08ec026c706........268c0e....8b46..26a3....268c0e....0e07")) {
+    if (
+        MSDOS.compareEP(
+            "eb$$bd....33c08ec026c706........268c0e....8b46..26a3....268c0e....0e07"
+        )
+    ) {
         sOptions = "by Rezaul Kabir //Shuvro";
         bDetected = true;
     }

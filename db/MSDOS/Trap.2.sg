@@ -4,7 +4,11 @@
 meta("protector", "Trap");
 
 function detect() {
-    if (MSDOS.compareEP("e800005b83c3..908bd3e8$$$$5b2e803f..74..90908bdab9....eb")) {
+    if (
+        MSDOS.compareEP(
+            "e800005b83c3..908bd3e8$$$$5b2e803f..74..90908bdab9....eb"
+        )
+    ) {
         sVersion = "1.21";
         sOptions = "by Christoph Gabler";
         bDetected = true;
@@ -20,7 +24,11 @@ function detect() {
         sVersion = "1.15";
         sOptions = "by Christoph Gabler";
         bDetected = true;
-    } else if (MSDOS.compareEP("e800005b83c3..908bd3e8$$$$5b2e803f..74..90908bdab9....2ec0")) {
+    } else if (
+        MSDOS.compareEP(
+            "e800005b83c3..908bd3e8$$$$5b2e803f..74..90908bdab9....2ec0"
+        )
+    ) {
         sVersion = "1.20";
         sOptions = "1998 by Christoph Gabler";
         bDetected = true;
@@ -28,11 +36,19 @@ function detect() {
         sVersion = "1.22";
         sOptions = "by Christoph Gabler";
         bDetected = true;
-    } else if (MSDOS.compareEP("81ea....eb$$b9....81c1....39d0bb....85c3b9....f505....bb....ba....81c2")) {
+    } else if (
+        MSDOS.compareEP(
+            "81ea....eb$$b9....81c1....39d0bb....85c3b9....f505....bb....ba....81c2"
+        )
+    ) {
         sVersion = "1.23";
         sOptions = "by Christoph Gabler";
         bDetected = true;
-    } else if (MSDOS.compareEP("eb$$39c281c3....eb$$81c3....39cc81ea....39e2b9....85da39e9eb")) {
+    } else if (
+        MSDOS.compareEP(
+            "eb$$39c281c3....eb$$81c3....39cc81ea....39e2b9....85da39e9eb"
+        )
+    ) {
         sVersion = "1.24";
         sOptions = "by Christoph Gabler";
         bDetected = true;
@@ -40,7 +56,9 @@ function detect() {
         sVersion = "1.13";
         sOptions = "by Christoph Gabler";
         bDetected = true;
-    } else if (MSDOS.compareEP("e8$$$$5d81ed....458cd68bfc0f23c70f23ceb0..e6..fa0e17")) {
+    } else if (
+        MSDOS.compareEP("e8$$$$5d81ed....458cd68bfc0f23c70f23ceb0..e6..fa0e17")
+    ) {
         sVersion = "1.26b1";
         sOptions = "2000 by Christoph Gabler";
         bDetected = true;

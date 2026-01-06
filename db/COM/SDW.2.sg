@@ -4,11 +4,17 @@
 meta("cryptor", "Shadow Com Cryptor (SDW)");
 
 function detect() {
-    if (Binary.compare("e9$$$$545b3bdc75..eb$$9c5b81cb....539d9c5825....75..e8")) {
+    if (
+        Binary.compare("e9$$$$545b3bdc75..eb$$9c5b81cb....539d9c5825....75..e8")
+    ) {
         sVersion = "1.7X";
         sOptions = "by MANtiC0RE";
         bDetected = true;
-    } else if (Binary.compare("e9$$$$545b3bdc75..eb$$9c5b81cb....539d9c5825....74..50584c4c5b33c3")) {
+    } else if (
+        Binary.compare(
+            "e9$$$$545b3bdc75..eb$$9c5b81cb....539d9c5825....74..50584c4c5b33c3"
+        )
+    ) {
         sVersion = "1.78";
         sOptions = "by MANtiC0RE";
         bDetected = true;
@@ -20,11 +26,17 @@ function detect() {
         sVersion = "1.7";
         sOptions = "by MANtiC0RE";
         bDetected = true;
-    } else if (Binary.compare("b8....bd....2e8a76..80f6..80ee..2e8876..83c5..4874..eb")) {
+    } else if (
+        Binary.compare("b8....bd....2e8a76..80f6..80ee..2e8876..83c5..4874..eb")
+    ) {
         sVersion = "1.80";
         sOptions = "by MANtiC0RE";
         bDetected = true;
-    } else if (Binary.compare("be....31d281c2....2e8034..83ee..83c2..74..31c005....50c3")) {
+    } else if (
+        Binary.compare(
+            "be....31d281c2....2e8034..83ee..83c2..74..31c005....50c3"
+        )
+    ) {
         sVersion = "1.80";
         sOptions = "by MANtiC0RE";
         bDetected = true;

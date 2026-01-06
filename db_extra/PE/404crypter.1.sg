@@ -4,7 +4,10 @@ meta("cryptor", "404Crypter");
 
 function detect() {
     if (PE.isNET()) {
-        if (PE.isNetObjectPresent("Z.resources") && PE.isNetObjectPresent("First")) {
+        if (
+            PE.isNetObjectPresent("Z.resources") &&
+            PE.isNetObjectPresent("First")
+        ) {
             bDetected = true;
         }
     }

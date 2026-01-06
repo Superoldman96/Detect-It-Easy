@@ -6,10 +6,20 @@ meta("protector", "com-crypt");
 function detect() {
     if (Binary.compare("b8....ffe0")) {
         sOffset = Binary.readWord(1);
-        if (Binary.compare("5756bf....b8....abb8....abb0..aa89feb9....31dbad01c329cb89d8abe2", sOffset - 0x100)) {
+        if (
+            Binary.compare(
+                "5756bf....b8....abb8....abb0..aa89feb9....31dbad01c329cb89d8abe2",
+                sOffset - 0x100
+            )
+        ) {
             sOptions = "by BlackLight, MANtiCORE";
             bDetected = true;
-        } else if (Binary.compare("be....562ec704....2ec744......2ec644....b9....8a0434..880446", sOffset - 0x100)) {
+        } else if (
+            Binary.compare(
+                "be....562ec704....2ec744......2ec644....b9....8a0434..880446",
+                sOffset - 0x100
+            )
+        ) {
             sName = "com-crypt on BASIC";
             sOptions = "by BlackLight, MANtiCORE";
             bDetected = true;

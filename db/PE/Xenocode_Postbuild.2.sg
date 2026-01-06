@@ -3,10 +3,15 @@
 meta("protector", "Xenocode Postbuild");
 
 function detect() {
-    if (PE.isNetObjectPresent("Xenocode.Client.Attributes.AssemblyAttributes")) {
+    if (
+        PE.isNetObjectPresent("Xenocode.Client.Attributes.AssemblyAttributes")
+    ) {
         sVersion = "2.X-3.X";
         bDetected = true;
-    } else if (PE.isSectionNamePresent(".xcpad") && PE.compareOverlay("'xvm'0001")) {
+    } else if (
+        PE.isSectionNamePresent(".xcpad") &&
+        PE.compareOverlay("'xvm'0001")
+    ) {
         bDetected = true;
     }
 

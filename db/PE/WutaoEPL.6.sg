@@ -11,7 +11,13 @@ meta("compiler", "Wutao Easy Compiler");
 function detect() {
     var ecodeSection = PE.section[".ecode"];
 
-    if (ecodeSection && PE.compare("'WTNE / MADE BY E COMPILER - WUTAO '", ecodeSection.FileOffset)) {
+    if (
+        ecodeSection &&
+        PE.compare(
+            "'WTNE / MADE BY E COMPILER - WUTAO '",
+            ecodeSection.FileOffset
+        )
+    ) {
         sVersion = "4.X";
         bDetected = true;
     }

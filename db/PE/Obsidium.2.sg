@@ -33,10 +33,14 @@ function detect() {
     } else if (PE.compareEP("E80E00000033C08B54240C8382B80000000DC36467FF36")) {
         sVersion = "1.2.X";
         bDetected = true;
-    } else if (PE.compareEP("EB04........E829000000EB02....EB01..8B54240CEB02")) {
+    } else if (
+        PE.compareEP("EB04........E829000000EB02....EB01..8B54240CEB02")
+    ) {
         sVersion = "1.3.0.0";
         bDetected = true;
-    } else if (PE.compareEP("EB02....E825000000EB04........EB01..8B54240CEB01")) {
+    } else if (
+        PE.compareEP("EB02....E825000000EB04........EB01..8B54240CEB01")
+    ) {
         sVersion = "1.3.0.4";
         bDetected = true;
     } else if (PE.compareEP("EB01..E826000000EB02....EB02....8B54240CEB01")) {
@@ -51,10 +55,14 @@ function detect() {
     } else if (PE.compareEP("EB02....E826000000EB03......EB01..8B54240CEB04")) {
         sVersion = "1.3.0.37";
         bDetected = true;
-    } else if (PE.compareEP("EB02....E827000000EB02....EB03......8B54240CEB01")) {
+    } else if (
+        PE.compareEP("EB02....E827000000EB02....EB03......8B54240CEB01")
+    ) {
         sVersion = "1.3.1.1";
         bDetected = true;
-    } else if (PE.compareEP("EB04........E82A000000EB03......EB04........8B54")) {
+    } else if (
+        PE.compareEP("EB04........E82A000000EB03......EB04........8B54")
+    ) {
         sVersion = "1.3.2.2";
         bDetected = true;
     } else if (PE.compareEP("EB01..E829000000EB02....EB03......8B54240CEB02")) {
@@ -63,19 +71,27 @@ function detect() {
     } else if (PE.compareEP("EB01..E82B000000EB02....EB02....8B54240CEB03")) {
         sVersion = "1.3.3.2";
         bDetected = true;
-    } else if (PE.compareEP("EB02....E829000000EB03......EB03......8B..240CEB")) {
+    } else if (
+        PE.compareEP("EB02....E829000000EB03......EB03......8B..240CEB")
+    ) {
         sVersion = "1.3.3.3";
         bDetected = true;
-    } else if (PE.compareEP("EB02....E829000000EB03......EB02....8B54240CEB03")) {
+    } else if (
+        PE.compareEP("EB02....E829000000EB03......EB02....8B54240CEB03")
+    ) {
         sVersion = "1.3.3.4";
         bDetected = true;
-    } else if (PE.compareEP("EB04........E828000000EB01..............8B54240")) {
+    } else if (
+        PE.compareEP("EB04........E828000000EB01..............8B54240")
+    ) {
         sVersion = "1.3.3.6";
         bDetected = true;
     } else if (PE.compareEP("EB02....E827000000EB03......EB01..8B54240CEB03")) {
         sVersion = "1.3.3.7";
         bDetected = true;
-    } else if (PE.compareEP("EB02....E82C000000EB04........EB04........8B5424")) {
+    } else if (
+        PE.compareEP("EB02....E82C000000EB04........EB04........8B5424")
+    ) {
         sVersion = "1.3.3.7";
         bDetected = true;
     } else if (PE.compareEP("EB04........E828000000EB01..EB01..8B54240CEB04")) {
@@ -84,99 +100,201 @@ function detect() {
     } else if (PE.compareEP("EB02....E829000000EB03......EB01..8B54240CEB04")) {
         sVersion = "1.3.3.9";
         bDetected = true;
-    } else if (PE.compareEP("EB01..E82A000000EB04........EB02....8B54240CEB03")) {
+    } else if (
+        PE.compareEP("EB01..E82A000000EB04........EB02....8B54240CEB03")
+    ) {
         sVersion = "1.3.4.1";
         bDetected = true;
     } else if (PE.compareEP("EB02....E826000000EB03......EB01..8B54240CEB02")) {
         sVersion = "1.3.4.2";
         bDetected = true;
-    } else if (PE.compareEP("EB03......E8........EB02....EB04........8B54240C")) {
+    } else if (
+        PE.compareEP("EB03......E8........EB02....EB04........8B54240C")
+    ) {
         sVersion = "1.3.5.0";
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB04........E8........EB02....EB04........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB04........50EB04........E8........EB02....EB04........33C0"
+        )
+    ) {
         sVersion = "1.4.2.0";
         bDetected = true;
-    } else if (PE.compareEP("EB02....50EB04........E8........EB01..EB01..8B54240C")) {
+    } else if (
+        PE.compareEP("EB02....50EB04........E8........EB01..EB01..8B54240C")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB01..E8........EB02....EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB04........50EB01..E8........EB02....EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB04........E8........EB02....EB04........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB05..........50EB04........E8........EB02....EB04........33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB02....E8........EB05..........EB04........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB03......50EB02....E8........EB05..........EB04........33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB01..E8........EB04........EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB01..E8........EB04........EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB04........E8........EB03......EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB04........E8........EB03......EB03......33C0")
+    ) {
         bDetected = true;
     } else if (PE.compareEP("EB01..50EB01..E8........EB01..EB02....33C0")) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB01..E8........EB05..........EB04........33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB01..E8........EB05..........EB04........33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB02....E8........EB02....EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB05..........50EB02....E8........EB02....EB03......33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB04........E8........EB04........EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB04........E8........EB04........EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB04........E8........EB04........EB03......8B54240C")) {
+    } else if (
+        PE.compareEP(
+            "EB03......50EB04........E8........EB04........EB03......8B54240C"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB02....E8........EB03......EB02....8B54240C")) {
+    } else if (
+        PE.compareEP(
+            "EB04........50EB02....E8........EB03......EB02....8B54240C"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB05..........E8........EB01..EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB04........50EB05..........E8........EB01..EB02....33C0")
+    ) {
         bDetected = true;
     } else if (PE.compareEP("EB04........E8........EB01..EB01..8B54240C")) {
         bDetected = true;
     } else if (PE.compareEP("EB03......E8........EB04........EB01..8B54240C")) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB02....E8........EB01..EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB02....E8........EB01..EB03......33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB01..E8........EB02....EB04........33C0")) {
+    } else if (
+        PE.compareEP("EB04........50EB01..E8........EB02....EB04........33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB03......E8........EB04........EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB03......E8........EB04........EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB01..E8........EB03......EB04........33C0")) {
+    } else if (
+        PE.compareEP("EB04........50EB01..E8........EB03......EB04........33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB01..E8........EB04........EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB01..E8........EB04........EB03......33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB01..E8........EB03......EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB01..E8........EB03......EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB02....50EB02....E8........EB04........EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB02....50EB02....E8........EB04........EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB02....E8........EB03......EB05..........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB04........50EB02....E8........EB03......EB05..........33C0"
+        )
+    ) {
         bDetected = true;
     } else if (PE.compareEP("EB01..50EB01..E8........EB02....EB03......33C0")) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB04........E8........EB04........EB03......33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB05..........50EB04........E8........EB04........EB03......33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB01..E8........EB03......EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB04........50EB01..E8........EB03......EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB02....E8........EB03......EB04........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB05..........50EB02....E8........EB03......EB04........33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB01..E8........EB04........EB04........33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB04........50EB01..E8........EB04........EB04........33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB02....50EB01..E8........EB05..........EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB02....50EB01..E8........EB05..........EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB04........E8........EB04........EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB04........E8........EB04........EB01..33C0")
+    ) {
         bDetected = true;
     } else if (PE.compareEP("EB03......50EB01..E8........EB01..EB02....33C0")) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB05..........E8........EB05..........EB03......33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB01..50EB05..........E8........EB05..........EB03......33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB02....E8........EB04........EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB02....E8........EB04........EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB03......50EB02....E8........EB03......EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB03......50EB02....E8........EB03......EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB04........E8........EB01..EB05..........33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB04........E8........EB01..EB05..........33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB01..E8........EB01..EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB05..........50EB01..E8........EB01..EB03......33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB04........E8........EB01..EB02....33C0")) {
+    } else if (
+        PE.compareEP("EB05..........50EB04........E8........EB01..EB02....33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB04........50EB03......E8........EB04........EB03......33C0")) {
+    } else if (
+        PE.compareEP(
+            "EB04........50EB03......E8........EB04........EB03......33C0"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB05..........50EB03......E8........EB01..EB01..33C0")) {
+    } else if (
+        PE.compareEP("EB05..........50EB03......E8........EB01..EB01..33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB01..50EB03......E8........EB05..........EB03......33C0")) {
+    } else if (
+        PE.compareEP("EB01..50EB03......E8........EB05..........EB03......33C0")
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("EB$$EB$$50EB$$E8$$$$$$$$EB$$B8........eb$$eb$$05........eb$$75..eb$$64ff30")) {
+    } else if (
+        PE.compareEP(
+            "EB$$EB$$50EB$$E8$$$$$$$$EB$$B8........eb$$eb$$05........eb$$75..eb$$64ff30"
+        )
+    ) {
         bDetected = true;
     } else if (PE.compareEP("EB")) {
         var ep = PE.OffsetToVA(PE.getEntryPointOffset());
@@ -187,19 +305,25 @@ function detect() {
             if (byte == 0x50) {
                 ep = PE.getDisasmNextAddress(ep);
                 byte = PE.readByte(PE.VAToOffset(ep));
-                if (byte == 0xEB) {
+                if (byte == 0xeb) {
                     byte = PE.readByte(PE.VAToOffset(ep) + 1);
                     if (byte < 6) {
                         ep = PE.getDisasmNextAddress(ep);
                         byte = PE.readByte(PE.VAToOffset(ep));
-                        if (byte == 0xE8) {
+                        if (byte == 0xe8) {
                             ep = PE.getDisasmNextAddress(ep + 5);
                             byte = PE.readByte(PE.VAToOffset(ep));
-                            if (byte == 0xEB) {
+                            if (byte == 0xeb) {
                                 byte = PE.readByte(PE.VAToOffset(ep) + 1);
                                 if (byte < 6) {
                                     ep = PE.getDisasmNextAddress(ep);
-                                    if (PE.compare('8B54240C', PE.VAToOffset(ep)) || PE.compare('33C0', PE.VAToOffset(ep))) {
+                                    if (
+                                        PE.compare(
+                                            "8B54240C",
+                                            PE.VAToOffset(ep)
+                                        ) ||
+                                        PE.compare("33C0", PE.VAToOffset(ep))
+                                    ) {
                                         sVersion = "1.4.X.X";
                                         bDetected = true;
                                     }
@@ -220,7 +344,11 @@ function detect() {
     }
     // Generic
     else if (PE.getEntryPointSection() == PE.nLastSection) {
-        if (PE.compareEP("EB") && PE.getImportSection() >= 0 && PE.isOverlayPresent()) {
+        if (
+            PE.compareEP("EB") &&
+            PE.getImportSection() >= 0 &&
+            PE.isOverlayPresent()
+        ) {
             bDetected = true;
         }
     } else if (PE.compareEP("EB")) {

@@ -4,7 +4,11 @@
 meta("sfx", "BPack SFX");
 
 function detect() {
-    if (Amiga.compareEP("6000$$$$3a002a486100....6100....6100....6100....41fa....217c")) {
+    if (
+        Amiga.compareEP(
+            "6000$$$$3a002a486100....6100....6100....6100....41fa....217c"
+        )
+    ) {
         bDetected = true;
     }
 

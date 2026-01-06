@@ -3,11 +3,17 @@
 meta("joiner", "DJoin");
 
 function detect() {
-    if (PE.compareEP("C605........00C605........00................00........00..........00")) {
+    if (
+        PE.compareEP(
+            "C605........00C605........00................00........00..........00"
+        )
+    ) {
         sVersion = "0.7 public";
         sOptions = "RC4 encryption";
         bDetected = true;
-    } else if (PE.compareEP("C605........00................00........00..........00")) {
+    } else if (
+        PE.compareEP("C605........00................00........00..........00")
+    ) {
         sVersion = "0.7 public";
         sOptions = "xor encryption";
         bDetected = true;

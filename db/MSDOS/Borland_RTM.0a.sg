@@ -6,18 +6,22 @@ meta("extender", "Borland RTM DPMI loader");
 function getBLVersion() {
     var sResult = "";
 
-    var nOffset = MSDOS.findString(0, MSDOS.getSize(), "RTM loader version")
+    var nOffset = MSDOS.findString(0, MSDOS.getSize(), "RTM loader version");
 
     if (nOffset != -1) {
         sResult = MSDOS.getString(nOffset + 19);
-        sResult = sResult.substr(0, sResult.indexOf(' '));
+        sResult = sResult.substr(0, sResult.indexOf(" "));
     }
 
     return sResult;
 }
 
 function detect() {
-    if (MSDOS.compareEP("b8....8ed8b8....bb....8ed08be38926....0626......8ec0263b......74..e9")) {
+    if (
+        MSDOS.compareEP(
+            "b8....8ed8b8....bb....8ed08be38926....0626......8ec0263b......74..e9"
+        )
+    ) {
         sVersion = "1.0-1.5";
         bDetected = true;
     }

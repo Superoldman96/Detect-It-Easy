@@ -4,7 +4,11 @@ meta("protector", "Adept Protector");
 
 function detect() {
     if (PE.isNET()) {
-        var nOffset = PE.findString(PE.section[0].FileOffset, PE.section[0].FileSize, "ByAdeptProtector");
+        var nOffset = PE.findString(
+            PE.section[0].FileOffset,
+            PE.section[0].FileSize,
+            "ByAdeptProtector"
+        );
         if (nOffset != -1) {
             if (PE.compare("'Smashed'", nOffset - 7)) {
                 sOptions = "Evaluation";

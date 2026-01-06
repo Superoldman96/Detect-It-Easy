@@ -8,7 +8,12 @@ function detect() {
     if (PE.compareEP("608BDDE8000000005D9532C095899D80000000B8", nEP)) {
         sVersion = "0.7.3 beta";
         bDetected = true;
-    } else if (PE.compareEP("60E8000000008D6424048B6C24FC8DB5........8D9D........33FF", nEP)) {
+    } else if (
+        PE.compareEP(
+            "60E8000000008D6424048B6C24FC8DB5........8D9D........33FF",
+            nEP
+        )
+    ) {
         sVersion = "1.0 beta";
         bDetected = true;
     } else if (PE.compareEP("60E8000000008B2C2483C404", nEP)) {
@@ -42,7 +47,11 @@ function detect() {
         }
 
         bDetected = true;
-    } else if (PE.getNumberOfImports() === 1 && PE.compareEP("60") && PE.isSectionNamePresent(".RLPack")) {
+    } else if (
+        PE.getNumberOfImports() === 1 &&
+        PE.compareEP("60") &&
+        PE.isSectionNamePresent(".RLPack")
+    ) {
         bDetected = true;
     }
 

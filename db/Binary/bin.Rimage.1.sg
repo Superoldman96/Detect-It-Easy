@@ -5,7 +5,9 @@
 meta("format", "Rimage Image Server");
 
 function detect() {
-    if (Binary.compare("'Rimage Image Server Version: 8.6.604.1'", 0x00008373)) {
+    if (
+        Binary.compare("'Rimage Image Server Version: 8.6.604.1'", 0x00008373)
+    ) {
         sVersion = "8.6.604.1";
         bDetected = true;
     }

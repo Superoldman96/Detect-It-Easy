@@ -9,7 +9,10 @@
 meta("library", "CommandLineParser");
 
 function detect() {
-    if (PE.isNetObjectPresent("CommandLine") && PE.isNetObjectPresent("ParseArguments")) {
+    if (
+        PE.isNetObjectPresent("CommandLine") &&
+        PE.isNetObjectPresent("ParseArguments")
+    ) {
         bDetected = true;
     }
 

@@ -4,7 +4,11 @@
 meta("protector", "QuickPack NT");
 
 function detect() {
-    if (PE.compareEP("4d5a90eb$$52e9$$$$$$$$e8$$$$$$$$5d8dad........8d9d........8d......506a..68........55ff53")) {
+    if (
+        PE.compareEP(
+            "4d5a90eb$$52e9$$$$$$$$e8$$$$$$$$5d8dad........8d9d........8d......506a..68........55ff53"
+        )
+    ) {
         sVersion = "0.1a";
         bDetected = true;
     }

@@ -4,7 +4,11 @@
 meta("extender", "DOS/32A DOS Extender");
 
 function detect() {
-    if (MSDOS.compareEP("fb0e1f8c1e....8c06....8c16....26a1....a3....fce8....e8....e8....8cd0268b36....05")) {
+    if (
+        MSDOS.compareEP(
+            "fb0e1f8c1e....8c06....8c16....26a1....a3....fce8....e8....e8....8cd0268b36....05"
+        )
+    ) {
         sVersion = "R9-07.0101.2011";
         sOptions = "1996-98, 2002 by Narech Koumar (Supernar Systems, Ltd.)";
         bDetected = true;
@@ -12,7 +16,9 @@ function detect() {
         sVersion = "R8-07.0101.0076";
         sOptions = "1996-98, 2002 by Narech Koumar (Supernar Systems, Ltd.)";
         bDetected = true;
-    } else if (MSDOS.compareEP("0e1f8c1e....8c06....8c16....26a1....a3....fbfce8")) {
+    } else if (
+        MSDOS.compareEP("0e1f8c1e....8c06....8c16....26a1....a3....fbfce8")
+    ) {
         sVersion = "04-20-06";
         sOptions = "1996-2006 by Narech Koumar (Supernar Systems, Ltd.)";
         bDetected = true;

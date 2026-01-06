@@ -4,7 +4,11 @@
 meta("packer", "Feokt run-time");
 
 function detect() {
-    if (PE.compareEP("8925........bf........31c0b9........29f9fcf3aa9bdbe350669bd93c249b")) {
+    if (
+        PE.compareEP(
+            "8925........bf........31c0b9........29f9fcf3aa9bdbe350669bd93c249b"
+        )
+    ) {
         sOptions = "by Max Feoktistov";
         bDetected = true;
     }

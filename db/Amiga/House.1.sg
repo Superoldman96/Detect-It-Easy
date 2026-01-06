@@ -4,7 +4,11 @@
 meta("cruncher", "House (RSI Packer)");
 
 function detect() {
-    if (Amiga.compareEP("................................13fc............41fa....43f9........47fa....49f9")) {
+    if (
+        Amiga.compareEP(
+            "................................13fc............41fa....43f9........47fa....49f9"
+        )
+    ) {
         sVersion = "1.4";
         bDetected = true;
     }

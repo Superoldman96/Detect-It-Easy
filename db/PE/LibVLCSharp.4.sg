@@ -9,7 +9,10 @@
 meta("library", "LibVLCSharp");
 
 function detect() {
-    if (PE.isNetObjectPresent("LibVLCSharp") || PE.isNetObjectPresent("LibVLCSharp.Shared")) {
+    if (
+        PE.isNetObjectPresent("LibVLCSharp") ||
+        PE.isNetObjectPresent("LibVLCSharp.Shared")
+    ) {
         bDetected = true;
     }
 

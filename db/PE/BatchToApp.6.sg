@@ -9,7 +9,9 @@
 meta("compiler", "BatchToApp");
 
 function detect() {
-    bDetected = PE.isNetObjectPresent("GeneratedWithBatchToApp") && PE.isNetUStringPresent("Unable to execute.");
+    bDetected =
+        PE.isNetObjectPresent("GeneratedWithBatchToApp") &&
+        PE.isNetUStringPresent("Unable to execute.");
 
     sLang = "Batch";
 

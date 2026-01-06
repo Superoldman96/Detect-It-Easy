@@ -20,7 +20,9 @@ function detect() {
         sVersion = "3.0.5";
         sOptions = "PowerPC HFS Optimizer";
         bDetected = true;
-    } else if (ISO9660.compare("....'Toast 3.5 PPC HFS Optimizer'", 0x0000040e)) {
+    } else if (
+        ISO9660.compare("....'Toast 3.5 PPC HFS Optimizer'", 0x0000040e)
+    ) {
         sVersion = "3.5";
         sOptions = "PowerPC HFS Optimizer";
         bDetected = true;
@@ -68,7 +70,9 @@ function detect() {
         sVersion = "5.0";
         sOptions = "HFS Optimizer";
         bDetected = true;
-    } else if (ISO9660.compare("'Toast 5.0.2 HFS/Joliet Builder'", 0x00000410)) {
+    } else if (
+        ISO9660.compare("'Toast 5.0.2 HFS/Joliet Builder'", 0x00000410)
+    ) {
         sVersion = "5.0.2";
         sOptions = "HFS/Joliet Builder";
         bDetected = true;

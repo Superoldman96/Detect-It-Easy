@@ -16,24 +16,56 @@ function detect() {
         sVersion = "1.4";
     } else if (PE.compareEP("8BEC83EC..5356578365....F3EB0C'eXPr-v.1.4.'")) {
         sVersion = "1.4";
-    } else if (PE.compareEP("558BEC83EC..5356578365..00F3EB0C'eXPr-v.1.4.'00")) {
+    } else if (
+        PE.compareEP("558BEC83EC..5356578365..00F3EB0C'eXPr-v.1.4.'00")
+    ) {
         sVersion = "1.4.5.X";
-    } else if (PE.compareEP("558BEC81EC........53565783A5..........F3EB0C'eXPr-v.1.5.'00")) {
+    } else if (
+        PE.compareEP(
+            "558BEC81EC........53565783A5..........F3EB0C'eXPr-v.1.5.'00"
+        )
+    ) {
         sVersion = "1.5.0.X";
-    } else if (PE.compareEP("558BEC81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'")) {
+    } else if (
+        PE.compareEP(
+            "558BEC81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'"
+        )
+    ) {
         sVersion = "1.6";
-    } else if (PE.compareEP("..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'")) {
+    } else if (
+        PE.compareEP(
+            "..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'"
+        )
+    ) {
         sVersion = "1.6";
-    } else if (PE.compareEP("6a..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'")) {
+    } else if (
+        PE.compareEP(
+            "6a..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'"
+        )
+    ) {
         sVersion = "1.6";
-    } else if (PE.compareEP("6a..6a..6a..6a..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'")) {
+    } else if (
+        PE.compareEP(
+            "6a..6a..6a..6a..68........E8$$$$$$$$....81EC........53565783A5..........F3EB0C'eXPr-v.1.6.'"
+        )
+    ) {
         sVersion = "1.6";
-    } else if (PE.compareEP("EB0168EB01........83EC0C535657EB01..833D........007408EB01E9E956010000EB02")) {
+    } else if (
+        PE.compareEP(
+            "EB0168EB01........83EC0C535657EB01..833D........007408EB01E9E956010000EB02"
+        )
+    ) {
         bDetected = true;
-    } else if (PE.compareEP("68########eb$$eb$$558bec83ec..535657eb$$833d..........74")) {
+    } else if (
+        PE.compareEP("68########eb$$eb$$558bec83ec..535657eb$$833d..........74")
+    ) {
         sVersion = "1.6.1";
     } else if (PE.compareEP("68........C3")) {
-        if (PE.section.length >= 3 && PE.section[0].FileSize == 0 && PE.section[2].Name == ".code") {
+        if (
+            PE.section.length >= 3 &&
+            PE.section[0].FileSize == 0 &&
+            PE.section[2].Name == ".code"
+        ) {
             sVersion = "1.5-1.6";
         }
     }

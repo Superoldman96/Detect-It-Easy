@@ -9,7 +9,8 @@ function getVersion() {
         var nOffset = ELF.findString(
             ELF.getSectionFileOffset(nSection),
             ELF.getSectionFileSize(nSection),
-            "DMD v");
+            "DMD v"
+        );
 
         if (nOffset != -1) {
             return ELF.getString(nOffset + 5, 20);

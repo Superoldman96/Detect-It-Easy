@@ -9,7 +9,12 @@
 meta("packer", "AtomPePacker");
 
 function detect() {
-    if (PE.is64() && PE.compareEP("4053574883EC**65488B1C25........FF15**......BA........41B8........488BC8")) {
+    if (
+        PE.is64() &&
+        PE.compareEP(
+            "4053574883EC**65488B1C25........FF15**......BA........41B8........488BC8"
+        )
+    ) {
         sOptions = PE.isSectionNamePresent(".ATOM") ? "x64 stub" : "modified";
         bDetected = true;
     }

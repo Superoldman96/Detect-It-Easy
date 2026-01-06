@@ -4,7 +4,11 @@
 meta("protector", "Int01-Destroyer");
 
 function detect() {
-    if (MSDOS.compareEP("fc33d28ec2bf....abab8cca33ff81ea....52ba....521e0733d2cb")) {
+    if (
+        MSDOS.compareEP(
+            "fc33d28ec2bf....abab8cca33ff81ea....52ba....521e0733d2cb"
+        )
+    ) {
         sOptions = "1994";
         bDetected = true;
     }

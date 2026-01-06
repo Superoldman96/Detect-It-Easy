@@ -23,7 +23,10 @@ function detect() {
         }
 
         if (!bDetected) {
-            if (PE.isNetObjectPresent("GetConsoleWindow") && PE.isNetObjectPresent("LoadInMem")) {
+            if (
+                PE.isNetObjectPresent("GetConsoleWindow") &&
+                PE.isNetObjectPresent("LoadInMem")
+            ) {
                 sVersion = "custom stub";
                 bDetected = true;
             }

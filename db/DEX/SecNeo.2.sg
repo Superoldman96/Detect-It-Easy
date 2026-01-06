@@ -8,7 +8,9 @@
 meta("protector", "SecNeo");
 
 function detect() {
-    bDetected = DEX.isDexItemStringPresent("Lcom/secneo/apkwrapper/ApplicationWrapper;");
+    bDetected = DEX.isDexItemStringPresent(
+        "Lcom/secneo/apkwrapper/ApplicationWrapper;"
+    );
 
     return result();
 }

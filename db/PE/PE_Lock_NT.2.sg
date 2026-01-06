@@ -12,7 +12,9 @@ function detect() {
     } else if (PE.compareEP("EB02C7851EEB03CD20C79CEB0269B160EB02EB01")) {
         sVersion = "2.03";
         bDetected = true;
-    } else if (PE.compareEP("EB$$1EEB$$9CEB$$EB$$60EB$$EB$$E8$$$$$$$$584050C3")) {
+    } else if (
+        PE.compareEP("EB$$1EEB$$9CEB$$EB$$60EB$$EB$$E8$$$$$$$$584050C3")
+    ) {
         sVersion = "2.04";
         bDetected = true;
     }

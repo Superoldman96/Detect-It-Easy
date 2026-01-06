@@ -3,7 +3,11 @@
 meta("compiler", "FASM");
 
 function detect() {
-    if (ELF.getElfHeader_shstrndx() == 0 && ELF.getElfHeader_shnum() == 0 && ELF.getElfHeader_shentsize()) {
+    if (
+        ELF.getElfHeader_shstrndx() == 0 &&
+        ELF.getElfHeader_shnum() == 0 &&
+        ELF.getElfHeader_shentsize()
+    ) {
         sVersion = "1.X";
         bDetected = true;
 

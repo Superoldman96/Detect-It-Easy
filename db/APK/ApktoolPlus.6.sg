@@ -8,7 +8,9 @@
 meta("tool", "ApktoolPlus");
 
 function detect() {
-    bDetected = APK.isArchiveRecordPresent("lib/armeabi-v7a/libapktoolplus_jiagu.so");
+    bDetected = APK.isArchiveRecordPresent(
+        "lib/armeabi-v7a/libapktoolplus_jiagu.so"
+    );
 
     return result();
 }

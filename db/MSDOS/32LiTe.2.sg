@@ -9,7 +9,11 @@
 meta("packer", "32LiTe");
 
 function detect() {
-    if (MSDOS.compareEP("1E060E1F0E07BE....BF....8BCFFC57F3A48CC80106....C333FF")) {
+    if (
+        MSDOS.compareEP(
+            "1E060E1F0E07BE....BF....8BCFFC57F3A48CC80106....C333FF"
+        )
+    ) {
         bDetected = true;
     }
 

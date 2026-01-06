@@ -14,7 +14,9 @@ function detect() {
         // Try to extract version if present
         var nVerPos = sAppId.indexOf("VER ");
         if (nVerPos !== -1) {
-            var sVersionRaw = sAppId.substring(nVerPos + 4, nVerPos + 13).trim();
+            var sVersionRaw = sAppId
+                .substring(nVerPos + 4, nVerPos + 13)
+                .trim();
             // Convert version "12,0,20,0" -> "12.0.20000"
             var versionParts = sVersionRaw.split(",");
             if (versionParts.length >= 3) {

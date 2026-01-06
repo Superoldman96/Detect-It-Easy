@@ -6,7 +6,6 @@
 // Telegram: @DosX_dev
 
 function detect() {
-
     // https://github.com/0xd4d/dnlib
     if (PE.isNetObjectPresent("dnlib") && PE.isNetObjectPresent("ModuleDef"))
         _setResult("library", "dnlib", "", "");
@@ -20,16 +19,17 @@ function detect() {
         _setResult("library", "AsmResolver", "", "");
 
     // https://learn.microsoft.com/en-us/dotnet/framework/reflection-and-codedom/using-the-codedom
-    if (PE.isNetObjectPresent("System.CodeDom.Compiler")) { // Standard .NET library
+    if (PE.isNetObjectPresent("System.CodeDom.Compiler")) {
+        // Standard .NET library
         var languages = "";
 
-        if (PE.isNetObjectPresent("CSharpCodeProvider"))
-            languages = "C#";
+        if (PE.isNetObjectPresent("CSharpCodeProvider")) languages = "C#";
 
         if (PE.isNetObjectPresent("VBCodeProvider"))
             languages += (languages ? " + " : "") + "VB.NET";
 
-        if (PE.isNetObjectPresent("JScriptCodeProvider")) // Should check the relation to System.CodeDom......
+        if (PE.isNetObjectPresent("JScriptCodeProvider"))
+            // Should check the relation to System.CodeDom......
             languages += (languages ? " + " : "") + "JScript";
 
         if (languages) {

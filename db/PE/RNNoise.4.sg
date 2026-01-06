@@ -9,7 +9,10 @@
 meta("library", "RNNoise Noise Suppressor");
 
 function detect() {
-    if (PE.isLibraryPresentExp(/rnnoise/i) || PE.isFunctionPresent("rnnoise_init")) {
+    if (
+        PE.isLibraryPresentExp(/rnnoise/i) ||
+        PE.isFunctionPresent("rnnoise_init")
+    ) {
         bDetected = true;
     } else if (PE.isExportFunctionPresentExp(/^rnnoise_/)) {
         sOptions = "static"; // EAT
