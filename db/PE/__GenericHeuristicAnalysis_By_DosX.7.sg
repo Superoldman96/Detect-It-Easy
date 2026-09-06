@@ -5341,9 +5341,11 @@ function scanForObfuscations_Native() {
         for (var i = 0; i < 64 && !isDegenerateEpConditionalBranchPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction),
+                currentEpInstructionLength = PE.getDisasmLength(degenerateEpCurrentAddress),
+                fallThroughEpInstructionAddress = degenerateEpCurrentAddress + currentEpInstructionLength,
                 nextEpInstructionAddress = PE.getDisasmNextAddress(degenerateEpCurrentAddress);
 
-            if (!currentEpOpCode || nextEpInstructionAddress === -1) break; // Safety check
+            if (!currentEpOpCode || currentEpInstructionLength <= 0 || nextEpInstructionAddress === -1) break; // Safety check
 
             var conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
                 directJump = currentEpInstruction.match(epDirectJumpPattern),
@@ -5365,7 +5367,7 @@ function scanForObfuscations_Native() {
                     branchPair = previousCanonicalBranchOpCode + ":" + currentCanonicalBranchOpCode,
                     reverseBranchPair = currentCanonicalBranchOpCode + ":" + previousCanonicalBranchOpCode;
 
-                if (currentBranchTarget === nextEpInstructionAddress ||
+                if (currentBranchTarget === fallThroughEpInstructionAddress ||
                     (currentBranchTarget === degenerateEpBranchTarget && PE.VAToOffset(currentBranchTarget) !== -1 &&
                         (epComplementaryBranchPairs.indexOf(branchPair) !== -1 || epComplementaryBranchPairs.indexOf(reverseBranchPair) !== -1))) {
                     log(logType.any, "Degenerate conditional branch near EP: " + currentEpInstruction);
@@ -5491,7 +5493,10 @@ function scanForObfuscations_Native() {
                     // an equivalent decimal/hex pair, but cannot merge two different imm64s.
                     currentReversibleLiteral = currentReversibleLiteralValue <= epMaximumSafeInteger ?
                         currentReversibleLiteralValue.toString() : reversibleBinaryInstruction[3].toUpperCase(),
-                    isInverseBinaryPair = reversibleEpRegister === currentReversibleRegister &&
+                    // A PE32+ r32 write clears the upper half, so the full register state
+                    // is not restored even when the low 32-bit operation is reversed.
+                    isInverseBinaryPair = !(PE_Cached.is64bit && epRegister32BitPattern.test(currentReversibleRegister)) &&
+                        reversibleEpRegister === currentReversibleRegister &&
                         reversibleEpLiteral === currentReversibleLiteral &&
                         ((reversibleEpOpCode === "XOR" && currentReversibleOpCode === "XOR") ||
                             (reversibleEpOpCode === "ADD" && currentReversibleOpCode === "SUB") ||
@@ -5511,7 +5516,8 @@ function scanForObfuscations_Native() {
                 var currentReversibleOpCode = reversibleUnaryInstruction[1].toUpperCase(),
                     currentReversibleRegister = reversibleUnaryInstruction[2].toUpperCase();
 
-                if (reversibleEpOpCode === currentReversibleOpCode && reversibleEpRegister === currentReversibleRegister) {
+                if (!(PE_Cached.is64bit && epRegister32BitPattern.test(currentReversibleRegister)) &&
+                    reversibleEpOpCode === currentReversibleOpCode && reversibleEpRegister === currentReversibleRegister) {
                     log(logType.any, "Reversible junk pair near EP: " + currentReversibleOpCode + " " + currentReversibleRegister);
 
                     isReversibleEpJunkPairPresent = true;
