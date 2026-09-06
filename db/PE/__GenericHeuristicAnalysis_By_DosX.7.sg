@@ -5916,6 +5916,101 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for instructions that cannot normally execute in a user-mode process.
+
+    var isPrivilegedEpOpCodePresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const privilegedEpOpCodes = [
+            "CLAC", "CLGI", "CLI", "CLTS", "HLT", "IN", "INSB", "INSD", "INSW",
+            "INVD", "INVLPG", "INVLPGA", "LGDT", "LIDT", "LLDT", "LMSW", "LTR",
+            "OUT", "OUTSB", "OUTSD", "OUTSW", "RDMSR", "RSM", "SKINIT", "STAC",
+            "STGI", "STI", "SWAPGS", "VMCALL", "VMCLEAR", "VMLAUNCH", "VMLOAD",
+            "VMPTRLD", "VMPTRST", "VMREAD", "VMRESUME", "VMRUN", "VMSAVE", "VMWRITE",
+            "VMXOFF", "VMXON", "WBINVD", "WRMSR", "XSETBV"
+        ];
+
+        for (var i = 0; i < 256 && !isPrivilegedEpOpCodePresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var isControlRegisterAccess = currentEpOpCode === "MOV" && /\bCR[0-8]\b/i.test(currentEpInstruction);
+
+            if (privilegedEpOpCodes.indexOf(currentEpOpCode) !== -1 || isControlRegisterAccess) {
+                log(logType.any, "Privileged instruction near user-mode EP: " + currentEpInstruction);
+
+                isPrivilegedEpOpCodePresent = true;
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                break;
+            }
+        }
+    }
+
+    if (isPrivilegedEpOpCodePresent) options = addOption(options, "Privileged op near EP");
+
+
+
+
+    // Check for descriptor-table and machine-status probes traditionally used by anti-VM code.
+
+    var isSystemEpProbePresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const systemEpProbeOpCodes = ["SGDT", "SIDT", "SLDT", "SMSW", "STR"];
+
+        for (var i = 0; i < 256 && !isSystemEpProbePresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            if (systemEpProbeOpCodes.indexOf(currentEpOpCode) !== -1) {
+                log(logType.any, "System-state probe near EP: " + currentEpInstruction);
+
+                isSystemEpProbePresent = true;
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                break;
+            }
+        }
+    }
+
+    if (isSystemEpProbePresent) options = addOption(options, "System probe near EP");
+
+
+
+
+    // Check for a direct transition from a regular user-mode entry stub into the kernel.
+
+    var isDirectEpSystemCallPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        for (var i = 0; i < 256 && !isDirectEpSystemCallPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            if (currentEpOpCode === "SYSCALL" || currentEpOpCode === "SYSENTER" ||
+                /^INT (?:0X0*2E|46)$/i.test(currentEpInstruction)) {
+                log(logType.any, "Direct system call near EP: " + currentEpInstruction);
+
+                isDirectEpSystemCallPresent = true;
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                break;
+            }
+        }
+    }
+
+    if (isDirectEpSystemCallPresent) options = addOption(options, "Direct syscall near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
