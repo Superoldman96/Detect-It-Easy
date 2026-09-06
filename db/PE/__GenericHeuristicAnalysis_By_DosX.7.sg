@@ -4924,10 +4924,39 @@ function scanForObfuscations_Native() {
         epFlagsGeneralPurposeRegister = "(?:" + epGeneralPurposeRegister + "|(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])W)",
         epRedundantSelfMoveRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|BP)" :
             "(?:(?:AX|BX|CX|DX|SI|DI|BP)|R(?:(?:AX|BX|CX|DX|SI|DI|BP)|(?:8|9|1[0-5])W?))",
+        epRegister32BitPrefixPattern = /^E/,
         epRegister32BitSuffixPattern = /D$/,
+        epRegister32BitPattern = /^(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])D)$/i,
         epRegisterCopyPattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (" + epGeneralPurposeRegister + ")$", "i"),
         epRedundantSelfMovePattern = new RegExp("^MOV (" + epRedundantSelfMoveRegister + "), \\1$", "i"),
+        epSimplePolymorphicInstructionPattern = new RegExp("^(?:MOV|XCHG) (" + epFlagsGeneralPurposeRegister + "), \\1$|^LEA (" + epGeneralPurposeRegister + "), \\[\\2\\]$", "i"),
+        epConditionalBranchPattern = /^(J[A-Z]+) (0X[0-9A-F]+|\d+)$/i,
+        epDirectJumpPattern = /^JMP (0X[0-9A-F]+|\d+)$/i,
+        epStackRoundTripPushPattern = new RegExp("^PUSH (" + epFlagsGeneralPurposeRegister + ")$", "i"),
+        epStackRoundTripPopPattern = new RegExp("^POP (" + epFlagsGeneralPurposeRegister + ")$", "i"),
+        epReversibleBinaryPattern = new RegExp("^(XOR|ADD|SUB) (" + epFlagsGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
+        epReversibleUnaryPattern = new RegExp("^(NOT|NEG|BSWAP) (" + epFlagsGeneralPurposeRegister + ")$", "i"),
+        epLiteralMovePattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
+        epLiteralComparePattern = new RegExp("^CMP (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
+        epFlagsNeutralRegisterWritePattern = new RegExp("^(?:MOV|MOVZX|MOVSX|LEA) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
+        epTrackedRegisterWritePattern = new RegExp("^(?:XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
         epNeutralInstructionLimit = 4,
+        epComplementaryBranchPairs = [
+            "JA:JBE", "JAE:JB", "JE:JNE", "JG:JLE", "JGE:JL", "JO:JNO", "JP:JNP", "JS:JNS"
+        ],
+        epCanonicalBranchOpCodes = {
+            "JC": "JB", "JNA": "JBE", "JNAE": "JB", "JNB": "JAE", "JNBE": "JA",
+            "JNC": "JAE", "JNG": "JLE", "JNGE": "JL", "JNL": "JGE", "JNLE": "JG",
+            "JNZ": "JNE", "JPE": "JP", "JPO": "JNP", "JZ": "JE"
+        },
+        epZeroFlagsAlwaysTakenBranches = [
+            "JAE", "JNB", "JNC", "JBE", "JNA", "JE", "JZ", "JGE", "JNL",
+            "JLE", "JNG", "JNO", "JNS", "JP", "JPE"
+        ],
+        epZeroFlagsNeverTakenBranches = [
+            "JA", "JNBE", "JB", "JNAE", "JC", "JG", "JNLE", "JL", "JNGE",
+            "JNE", "JNZ", "JO", "JNP", "JPO", "JS"
+        ],
         epScanStopOpCodes = [
             "CALL", "JMP", "RET", "RETN", "INT", "UD2", "HLT"
         ];
@@ -4970,9 +4999,10 @@ function scanForObfuscations_Native() {
                 stackPivotAddress = PE_Cached.isI386 ? currentEpInstruction.match(/^MOV ESP, (0X[0-9A-F]+|\d+)$/i) : null,
                 targetAddress = pushedAddress || storedAddress,
                 registerWrite = currentEpInstruction.match(new RegExp("^(?:MOV|LEA|XOR|ADD|SUB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
                 isNeutralInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "CLC" ||
                     currentEpOpCode === "STC" || currentEpOpCode === "CMC" ||
-                    new RegExp("^(?:MOV|XCHG) (" + epGeneralPurposeRegister + "), \\1$|^LEA (" + epGeneralPurposeRegister + "), \\[\\2\\]$", "i").test(currentEpInstruction);
+                    (simplePolymorphicInstruction && !(currentEpOpCode === "XCHG" && epRegister32BitPattern.test(simplePolymorphicInstruction[1])));
 
             if (stackPivotAddress) {
                 // A pivot is accepted only when its new stack contains an image VA.
@@ -4993,15 +5023,15 @@ function scanForObfuscations_Native() {
                 syntheticEpNeutralInstructionCount = 0;
             } else if (registerLiteralAddress && PE.VAToOffset(parseInt(registerLiteralAddress[2], 0)) !== -1) {
                 // MOV reg, <VA> establishes a proven target for a later PUSH/MOV/XCHG.
-                syntheticEpKnownAddresses[registerLiteralAddress[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())] = registerLiteralAddress[2];
+                syntheticEpKnownAddresses[registerLiteralAddress[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = registerLiteralAddress[2];
                 syntheticEpNeutralInstructionCount = 0;
-            } else if (registerCopy && syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
+            } else if (registerCopy && syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
                 // Preserve provenance through a plain register-to-register copy. A 32-bit
                 // destination zero-extends the truncated value, so validate that VA again.
-                const registerCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitSuffixPattern, String());
-                var registerCopySourceAddress = syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                const registerCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+                var registerCopySourceAddress = syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
 
-                if (epRegister32BitSuffixPattern.test(registerCopy[1])) {
+                if (epRegister32BitPattern.test(registerCopy[1])) {
                     registerCopySourceAddress = (parseInt(registerCopySourceAddress, 0) >>> 0).toString();
                 }
 
@@ -5013,21 +5043,21 @@ function scanForObfuscations_Native() {
                 syntheticEpNeutralInstructionCount = 0;
             } else if (poppedRegister && syntheticEpTargetAddress) {
                 // PUSH <VA>; POP reg is a common polymorphic spelling of MOV reg, <VA>.
-                syntheticEpKnownAddresses[poppedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())] = syntheticEpTargetAddress;
+                syntheticEpKnownAddresses[poppedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = syntheticEpTargetAddress;
                 syntheticEpTargetAddress = String();
                 syntheticEpTargetType = String();
                 syntheticEpNeutralInstructionCount = 0;
-            } else if (pushedRegister && syntheticEpKnownAddresses[pushedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
-                syntheticEpTargetAddress = syntheticEpKnownAddresses[pushedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+            } else if (pushedRegister && syntheticEpKnownAddresses[pushedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
+                syntheticEpTargetAddress = syntheticEpKnownAddresses[pushedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 syntheticEpTargetType = "register push";
                 syntheticEpNeutralInstructionCount = 0;
-            } else if (storedRegister && syntheticEpKnownAddresses[storedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
-                syntheticEpTargetAddress = syntheticEpKnownAddresses[storedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+            } else if (storedRegister && syntheticEpKnownAddresses[storedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
+                syntheticEpTargetAddress = syntheticEpKnownAddresses[storedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 syntheticEpTargetType = "register stack write";
                 syntheticEpNeutralInstructionCount = 0;
-            } else if (exchangedRegister && syntheticEpKnownAddresses[exchangedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
+            } else if (exchangedRegister && syntheticEpKnownAddresses[exchangedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
                 // XCHG [ESP/RSP], reg replaces the return address without a direct MOV.
-                syntheticEpTargetAddress = syntheticEpKnownAddresses[exchangedRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                syntheticEpTargetAddress = syntheticEpKnownAddresses[exchangedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 syntheticEpTargetType = "register stack exchange";
                 syntheticEpNeutralInstructionCount = 0;
             } else if (/^RET(?:N)?$/.test(currentEpOpCode) && syntheticEpTargetAddress) {
@@ -5041,7 +5071,7 @@ function scanForObfuscations_Native() {
             } else if (registerWrite) {
                 // An unrelated register write cannot invalidate other proven addresses.
                 // Remove only the overwritten register instead of discarding all provenance.
-                delete syntheticEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                delete syntheticEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1) {
                 // Do not linearly join instructions from a subsequent basic block.
                 break;
@@ -5071,15 +5101,7 @@ function scanForObfuscations_Native() {
             opaqueEpOriginInstruction = String(),
             opaqueEpNeutralInstructionCount = 0,
             // Plain-object entries are configurable, therefore strict-mode delete is safe.
-            opaqueEpKnownZeroRegisters = {},
-            opaqueEpAlwaysTakenBranches = [
-                "JAE", "JNB", "JNC", "JBE", "JNA", "JE", "JZ", "JGE", "JNL",
-                "JLE", "JNG", "JNO", "JNS", "JP", "JPE"
-            ],
-            opaqueEpNeverTakenBranches = [
-                "JA", "JNBE", "JB", "JNAE", "JC", "JG", "JNLE", "JL", "JNGE",
-                "JNE", "JNZ", "JO", "JNP", "JPO", "JS"
-            ];
+            opaqueEpKnownZeroRegisters = {};
 
         for (var i = 0; i < 256 && !isOpaqueEpBranchPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
@@ -5091,16 +5113,16 @@ function scanForObfuscations_Native() {
             var constantFlagsRegister = currentEpInstruction.match(new RegExp("^(?:(?:XOR|SUB|CMP) (" + epFlagsGeneralPurposeRegister + "), \\1|AND (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+))$", "i")),
                 zeroLiteralRegister = currentEpInstruction.match(new RegExp("^MOV (" + epGeneralPurposeRegister + "), (?:0X0+|0+)$", "i")),
                 zeroTestRegister = currentEpInstruction.match(new RegExp("^(?:TEST|OR) (" + epGeneralPurposeRegister + "), \\1$", "i")),
-                conditionalBranch = currentEpInstruction.match(/^(J[A-Z]+) (0X[0-9A-F]+|\d+)$/i),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
-                flagsNeutralRegisterWrite = currentEpInstruction.match(new RegExp("^(?:MOV|MOVZX|MOVSX|LEA) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
+                flagsNeutralRegisterWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern),
                 registerWrite = currentEpInstruction.match(new RegExp("^(?:MOV|MOVZX|MOVSX|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
                 isNeutralInstruction = currentEpOpCode === "NOP" ||
                     new RegExp("^XCHG (" + epGeneralPurposeRegister + "), \\1$", "i").test(currentEpInstruction);
 
             if (constantFlagsRegister) {
                 // Start a new candidate only from an instruction with mathematically known flags.
-                opaqueEpRegister = (constantFlagsRegister[1] || constantFlagsRegister[2]).toUpperCase().replace(epRegister32BitSuffixPattern, String());
+                opaqueEpRegister = (constantFlagsRegister[1] || constantFlagsRegister[2]).toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
                 opaqueEpOriginInstruction = currentEpInstruction;
                 opaqueEpNeutralInstructionCount = 0;
                 if (currentEpOpCode !== "CMP") {
@@ -5108,7 +5130,7 @@ function scanForObfuscations_Native() {
                 }
             } else if (zeroLiteralRegister) {
                 // MOV reg, 0 preserves prior flags but enables a later TEST/OR reg, reg.
-                opaqueEpKnownZeroRegisters[zeroLiteralRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())] = true;
+                opaqueEpKnownZeroRegisters[zeroLiteralRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = true;
                 if (opaqueEpRegister && ++opaqueEpNeutralInstructionCount > epNeutralInstructionLimit) {
                     opaqueEpRegister = String();
                     opaqueEpOriginInstruction = String();
@@ -5116,11 +5138,11 @@ function scanForObfuscations_Native() {
                 }
             } else if (registerCopy) {
                 // Preserve zero provenance only through an exact register-to-register copy.
-                if (opaqueEpKnownZeroRegisters[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
-                    opaqueEpKnownZeroRegisters[registerCopy[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())] = true;
+                if (opaqueEpKnownZeroRegisters[registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
+                    opaqueEpKnownZeroRegisters[registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = true;
                 } else {
                     // The source is unknown, so only the overwritten destination loses proof.
-                    delete opaqueEpKnownZeroRegisters[registerCopy[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                    delete opaqueEpKnownZeroRegisters[registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 }
 
                 if (opaqueEpRegister && ++opaqueEpNeutralInstructionCount > epNeutralInstructionLimit) {
@@ -5128,16 +5150,16 @@ function scanForObfuscations_Native() {
                     opaqueEpOriginInstruction = String();
                     opaqueEpNeutralInstructionCount = 0;
                 }
-            } else if (zeroTestRegister && opaqueEpKnownZeroRegisters[zeroTestRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())]) {
+            } else if (zeroTestRegister && opaqueEpKnownZeroRegisters[zeroTestRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())]) {
                 // TEST/OR of a proven zero register re-establishes deterministic EFLAGS.
-                opaqueEpRegister = zeroTestRegister[1].toUpperCase().replace(epRegister32BitSuffixPattern, String());
+                opaqueEpRegister = zeroTestRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
                 opaqueEpOriginInstruction = currentEpInstruction;
                 opaqueEpNeutralInstructionCount = 0;
             } else if (conditionalBranch && opaqueEpRegister &&
                 PE.VAToOffset(parseInt(conditionalBranch[2], 0)) !== -1 &&
-                (opaqueEpAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ||
-                    opaqueEpNeverTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1)) {
-                var opaqueEpBranchType = opaqueEpAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ? "always taken" : "never taken";
+                (epZeroFlagsAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ||
+                    epZeroFlagsNeverTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1)) {
+                var opaqueEpBranchType = epZeroFlagsAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ? "always taken" : "never taken";
 
                 log(logType.any, "Opaque " + opaqueEpBranchType + " branch near EP: " + opaqueEpOriginInstruction + "; " + currentEpInstruction);
 
@@ -5145,7 +5167,7 @@ function scanForObfuscations_Native() {
             } else if (flagsNeutralRegisterWrite) {
                 // A flags-neutral write invalidates only its destination, not candidate EFLAGS.
                 // This retains a constant branch even when polymorphic junk changes another register.
-                delete opaqueEpKnownZeroRegisters[flagsNeutralRegisterWrite[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                delete opaqueEpKnownZeroRegisters[flagsNeutralRegisterWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 if (opaqueEpRegister && ++opaqueEpNeutralInstructionCount > epNeutralInstructionLimit) {
                     opaqueEpRegister = String();
                     opaqueEpOriginInstruction = String();
@@ -5160,7 +5182,7 @@ function scanForObfuscations_Native() {
             } else if (registerWrite) {
                 // A flags-changing write destroys both the candidate and this register's value.
                 // Other known-zero registers remain valid until they are individually overwritten.
-                delete opaqueEpKnownZeroRegisters[registerWrite[1].toUpperCase().replace(epRegister32BitSuffixPattern, String())];
+                delete opaqueEpKnownZeroRegisters[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 opaqueEpRegister = String();
                 opaqueEpOriginInstruction = String();
                 opaqueEpNeutralInstructionCount = 0;
