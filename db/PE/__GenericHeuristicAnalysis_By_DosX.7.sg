@@ -4921,6 +4921,7 @@ function scanForObfuscations_Native() {
 
 
     const epGeneralPurposeRegister = "(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:AX|BX|CX|DX|SI|DI|BP|8D?|9D?|1[0-5]D?))",
+        epFlagsGeneralPurposeRegister = "(?:" + epGeneralPurposeRegister + "|(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])W)",
         epRegister32BitSuffixPattern = /D$/,
         epRegisterCopyPattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (" + epGeneralPurposeRegister + ")$", "i"),
         epNeutralInstructionLimit = 4,
@@ -5084,7 +5085,7 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode) break; // Safety check
 
             // These forms deterministically set EFLAGS without requiring register values.
-            var constantFlagsRegister = currentEpInstruction.match(new RegExp("^(?:(?:XOR|SUB|CMP) (" + epGeneralPurposeRegister + "), \\1|AND (" + epGeneralPurposeRegister + "), (?:0X0+|0+))$", "i")),
+            var constantFlagsRegister = currentEpInstruction.match(new RegExp("^(?:(?:XOR|SUB|CMP) (" + epFlagsGeneralPurposeRegister + "), \\1|AND (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+))$", "i")),
                 zeroLiteralRegister = currentEpInstruction.match(new RegExp("^MOV (" + epGeneralPurposeRegister + "), (?:0X0+|0+)$", "i")),
                 zeroTestRegister = currentEpInstruction.match(new RegExp("^(?:TEST|OR) (" + epGeneralPurposeRegister + "), \\1$", "i")),
                 conditionalBranch = currentEpInstruction.match(/^(J[A-Z]+) (0X[0-9A-F]+|\d+)$/i),

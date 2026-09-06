@@ -21,7 +21,7 @@ function detect() {
         var pythonRuntimeLibraryName = PE.isLibraryPresentExp(/^python/i);
 
         if (pythonRuntimeLibraryName && PE.findString(dataSectionOffset, dataSectionSize, "__nuitka_version__") !== -1) {
-            sVersion = getPythonVersionByDll(pythonRuntimeLibraryName);
+            sVersion = getPythonVersionByDll(pythonRuntimeLibraryName[0]);
             bDetected = true;
         } else if (PE.findString(dataSectionOffset, dataSectionSize, "NUITKA_ONEFILE_PARENT") !== -1) {
             sOptions = "OneFile";

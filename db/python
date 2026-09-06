@@ -9,7 +9,7 @@
 function getPythonVersionByDll(dllFileName) {
     var pythonVersion = String();
 
-    var startIndex = dllFileName.indexOf("python");
+    var startIndex = dllFileName.toLowerCase().indexOf("python");
     if (startIndex !== -1) {
         startIndex += 6;
         var endIndex = dllFileName.indexOf(".", startIndex);
