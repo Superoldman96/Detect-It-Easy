@@ -6184,6 +6184,101 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for native trap-flag inspection or deliberate single-step activation near EP.
+
+    var isEpTrapFlagCheckPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const trapFlagNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
+                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            trapFlagStackPointer = PE_Cached.isI386 ? "ESP" : "RSP",
+            trapFlagPushPattern = PE_Cached.isI386 ? /^(?:PUSHF|PUSHFD)$/ : /^(?:PUSHF|PUSHFQ)$/,
+            trapFlagPopPattern = PE_Cached.isI386 ? /^(?:POPF|POPFD)$/ : /^(?:POPF|POPFQ)$/,
+            trapFlagPopRegisterPattern = new RegExp("^POP (" + trapFlagNativeRegister + ")$", "i"),
+            trapFlagRegisterTestPattern = new RegExp("^(?:TEST|AND) (" + epGeneralPurposeRegister + "), (?:0X0*100|256)$|^BT (" + epGeneralPurposeRegister + "), (?:0X0*8|8)$", "i"),
+            trapFlagStackSetPattern = new RegExp("^(?:OR|XOR) (?:(?:DWORD|QWORD) PTR )?\\[" + trapFlagStackPointer + "\\], (?:0X0*100|256)$", "i");
+
+        // State 1 tracks flags saved on the stack; state 2 follows the matching
+        // native-width POP; state 3 waits for a condition compatible with the
+        // TEST/AND or BT flags; state 4 tracks direct TF modification on the stack.
+        var trapFlagState = 0,
+            trapFlagRegister = String(),
+            trapFlagTestOpCode = String(),
+            trapFlagNeutralInstructionCount = 0;
+
+        for (var i = 0; i < 256 && !isEpTrapFlagCheckPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var poppedFlagsRegister = currentEpInstruction.match(trapFlagPopRegisterPattern),
+                testedFlagsRegister = currentEpInstruction.match(trapFlagRegisterTestPattern),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                valuePreservingInstruction = currentEpInstruction.match(epValuePreservingInstructionPattern),
+                flagsNeutralRegisterWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern),
+                registerWrite = flagsNeutralRegisterWrite || currentEpInstruction.match(epTrackedRegisterWritePattern),
+                registerWriteKey = registerWrite ? registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()) : String(),
+                isRegisterOnlyInstruction = registerWrite && currentEpOpCode !== "POP",
+                isStatePreservingInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
+                    currentEpOpCode === "PAUSE" || simplePolymorphicInstruction ||
+                    ((trapFlagState === 1 || trapFlagState === 4) &&
+                        (isRegisterOnlyInstruction || /^(?:CMP|TEST)$/.test(currentEpOpCode))) ||
+                    (trapFlagState === 2 && ((isRegisterOnlyInstruction && registerWriteKey !== trapFlagRegister) ||
+                        valuePreservingInstruction)) ||
+                    (trapFlagState === 3 && flagsNeutralRegisterWrite);
+
+            if (trapFlagPushPattern.test(currentEpOpCode)) {
+                trapFlagState = 1;
+                trapFlagRegister = String();
+                trapFlagTestOpCode = String();
+                trapFlagNeutralInstructionCount = 0;
+            } else if (trapFlagState === 1 && trapFlagStackSetPattern.test(currentEpInstruction)) {
+                trapFlagState = 4;
+                trapFlagNeutralInstructionCount = 0;
+            } else if (trapFlagState === 4 && trapFlagPopPattern.test(currentEpOpCode)) {
+                log(logType.any, "Trap flag enabled near EP: " + currentEpInstruction);
+
+                isEpTrapFlagCheckPresent = true;
+            } else if (trapFlagState === 1 && poppedFlagsRegister) {
+                trapFlagRegister = poppedFlagsRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+                trapFlagState = 2;
+                trapFlagNeutralInstructionCount = 0;
+            } else if (trapFlagState === 2 && testedFlagsRegister && trapFlagRegister ===
+                (testedFlagsRegister[1] || testedFlagsRegister[2]).toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())) {
+                trapFlagState = 3;
+                trapFlagTestOpCode = currentEpOpCode;
+                trapFlagNeutralInstructionCount = 0;
+            } else if (trapFlagState === 3 && conditionalBranch && (
+                (trapFlagTestOpCode === "BT" && ["JAE", "JB", "JC", "JNAE", "JNB", "JNC"].indexOf(currentEpOpCode) !== -1) ||
+                (trapFlagTestOpCode !== "BT" && ["JE", "JNE", "JNZ", "JZ"].indexOf(currentEpOpCode) !== -1)
+            )) {
+                log(logType.any, "Trap flag checked near EP: " + currentEpInstruction);
+
+                isEpTrapFlagCheckPresent = true;
+            } else if (isStatePreservingInstruction && trapFlagState &&
+                trapFlagNeutralInstructionCount < epNeutralInstructionLimit) {
+                // Before the explicit TEST/BT, flag-changing junk on unrelated registers
+                // is harmless. Afterwards only instructions that preserve EFLAGS are safe.
+                trapFlagNeutralInstructionCount++;
+            } else {
+                trapFlagState = 0;
+                trapFlagRegister = String();
+                trapFlagTestOpCode = String();
+                trapFlagNeutralInstructionCount = 0;
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
+            }
+        }
+    }
+
+    if (isEpTrapFlagCheckPresent) options = addOption(options, "Trap flag check near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
