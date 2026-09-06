@@ -10433,6 +10433,19 @@ function scanNameForAnomalies_FileSystem_NET_and_Native() {
 
 
 
+    // Checking for EXE extension in PE files with the DLL characteristic
+
+    var hasExeExtensionWithDllCharacteristic = false;
+
+    if (executableFileSystemExtension === "exe" && PE_Cached.isDynamicLinkLibrary) {
+        hasExeExtensionWithDllCharacteristic = true;
+    }
+
+    if (hasExeExtensionWithDllCharacteristic) options = addOption(options, "DLL Image with \".EXE\" extension");
+
+
+
+
     if (options.length !== 0) isDetected = true;
 
 
