@@ -1642,7 +1642,7 @@ function scanForAntiAnalysis_Native() {
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const antiDebugNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
-                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             antiDebugGeneralPurposeRegister = "(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:AX|BX|CX|DX|SI|DI|BP|8D?|9D?|1[0-5]D?))",
             antiDebugRegister32BitPrefixPattern = /^E/,
             antiDebugRegister32BitSuffixPattern = /D$/,
@@ -5350,9 +5350,9 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary && PE_Cached.isArchX86) {
         const opaqueEpAllOnesFlagsAlwaysTakenBranches = [
-                "JA", "JNBE", "JAE", "JNB", "JNC", "JNE", "JNZ", "JL",
-                "JNGE", "JLE", "JNG", "JNO", "JS", "JP", "JPE"
-            ],
+            "JA", "JNBE", "JAE", "JNB", "JNC", "JNE", "JNZ", "JL",
+            "JNGE", "JLE", "JNG", "JNO", "JS", "JP", "JPE"
+        ],
             opaqueEpAllOnesFlagsNeverTakenBranches = [
                 "JB", "JNAE", "JC", "JBE", "JNA", "JE", "JZ", "JG",
                 "JNLE", "JGE", "JNL", "JO", "JNS", "JNP", "JPO"
@@ -5897,7 +5897,7 @@ function scanForObfuscations_Native() {
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const pebModuleWalkNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
-                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             pebModuleWalkSegment = PE_Cached.isI386 ? "FS" : "GS",
             pebModuleWalkPebAddress = PE_Cached.isI386 ? "(?:0X0*30|48)" : "(?:0X0*60|96)",
             pebModuleWalkLdrOffset = PE_Cached.isI386 ? "(?:0X0*C|12)" : "(?:0X0*18|24)",
@@ -5961,8 +5961,8 @@ function scanForObfuscations_Native() {
                 }
             } else if (simplePolymorphicInstruction || valuePreservingInstruction) {
                 var pebModuleWalkPreservingRegister = (simplePolymorphicInstruction ?
-                        (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) :
-                        (valuePreservingInstruction[1] || valuePreservingInstruction[2])).toUpperCase(),
+                    (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) :
+                    (valuePreservingInstruction[1] || valuePreservingInstruction[2])).toUpperCase(),
                     pebModuleWalkPreservingRegisterKey = pebModuleWalkPreservingRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
 
                 if (PE_Cached.is64bit && epRegister32BitPattern.test(pebModuleWalkPreservingRegister)) {
@@ -6331,7 +6331,7 @@ function scanForObfuscations_Native() {
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const trapFlagNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
-                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             trapFlagStackPointer = PE_Cached.isI386 ? "ESP" : "RSP",
             trapFlagPushPattern = PE_Cached.isI386 ? /^(?:PUSHF|PUSHFD)$/ : /^(?:PUSHF|PUSHFQ)$/,
             trapFlagPopPattern = PE_Cached.isI386 ? /^(?:POPF|POPFD)$/ : /^(?:POPF|POPFQ)$/,
