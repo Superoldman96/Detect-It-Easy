@@ -5299,6 +5299,49 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for a register pushed and restored immediately through simple junk instructions.
+
+    var isRedundantEpStackRoundTripPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && PE_Cached.isArchX86) {
+        var redundantEpPushedRegister = String(),
+            redundantEpStackNeutralInstructionCount = 0;
+
+        for (var i = 0; i < 64 && !isRedundantEpStackRoundTripPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var pushedRegister = currentEpInstruction.match(epStackRoundTripPushPattern),
+                poppedRegister = currentEpInstruction.match(epStackRoundTripPopPattern),
+                isSimplePolymorphicInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
+                    epSimplePolymorphicInstructionPattern.test(currentEpInstruction);
+
+            if (pushedRegister) {
+                redundantEpPushedRegister = pushedRegister[1].toUpperCase();
+                redundantEpStackNeutralInstructionCount = 0;
+            } else if (poppedRegister && redundantEpPushedRegister === poppedRegister[1].toUpperCase()) {
+                log(logType.any, "Redundant stack round-trip near EP: PUSH/POP " + redundantEpPushedRegister);
+
+                isRedundantEpStackRoundTripPresent = true;
+            } else if (isSimplePolymorphicInstruction && redundantEpPushedRegister &&
+                redundantEpStackNeutralInstructionCount < epNeutralInstructionLimit) {
+                redundantEpStackNeutralInstructionCount++;
+            } else {
+                redundantEpPushedRegister = String();
+                redundantEpStackNeutralInstructionCount = 0;
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]+$/.test(currentEpOpCode)) break;
+            }
+        }
+    }
+
+    if (isRedundantEpStackRoundTripPresent) options = addOption(options, "Redundant stack round-trip near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
