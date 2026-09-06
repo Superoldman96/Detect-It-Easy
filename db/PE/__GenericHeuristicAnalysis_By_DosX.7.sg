@@ -2302,6 +2302,7 @@ function getFileNameWithoutExtension(fileName) {
 
 
 const
+    SECTION_FLAGS_DISCARDABLE = 0x02000000, // IMAGE_SCN_MEM_DISCARDABLE
     SECTION_FLAGS_EXECUTE = 0x20000000, // IMAGE_SCN_MEM_EXECUTE
     SECTION_FLAGS_READ = 0x40000000,    // IMAGE_SCN_MEM_READ
     SECTION_FLAGS_WRITE = 0x80000000,   // IMAGE_SCN_MEM_WRITE
@@ -6556,7 +6557,7 @@ function scanForObfuscations_Native() {
 
     var isEpSectionZeroPaddingPresent = false;
 
-    var epSectionWithZeroPaddingIndex = -1;
+    var entryPointSectionIndex = -1;
     var isEpInNonExecutableSection = false;
 
     // Find the section that contains the entry point
@@ -6570,20 +6571,54 @@ function scanForObfuscations_Native() {
         // Check if the entry point is within this section
         if (entryPointRva >= sectionVirtualAddress &&
             entryPointRva < sectionVirtualAddress + sectionVirtualSize) {
-            epSectionWithZeroPaddingIndex = i;
+            entryPointSectionIndex = i;
             if (!(PE.section[i].Characteristics & SECTION_FLAGS_EXECUTE)) {
                 isEpInNonExecutableSection = true;
             }
 
             // Check for zero padding at the beginning of the section
-            if (PE.compare("00 00 00", PE.getSectionFileOffset(epSectionWithZeroPaddingIndex))) {
+            if (PE.compare("00 00 00", PE.getSectionFileOffset(entryPointSectionIndex))) {
                 isEpSectionZeroPaddingPresent = true;
             }
         }
     }
 
-    if (isEpSectionZeroPaddingPresent) options = addOption(options, "EP-section #" + epSectionWithZeroPaddingIndex + " (\"" + cleanSectionName(PE.getSectionName(epSectionWithZeroPaddingIndex)) + "\") zero padding");
+    if (isEpSectionZeroPaddingPresent) options = addOption(options, "EP-section #" + entryPointSectionIndex + " (\"" + cleanSectionName(PE.getSectionName(entryPointSectionIndex)) + "\") zero padding");
     if (isEpInNonExecutableSection) options = addOption(options, "EP in non-executable section");
+
+
+
+
+    // A normal user-mode process cannot discard the section containing its entry point.
+
+    var isDiscardableEpSectionPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        entryPointSectionIndex !== -1 &&
+        (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_DISCARDABLE)) {
+        isDiscardableEpSectionPresent = true;
+    }
+
+    if (isDiscardableEpSectionPresent) options = addOption(options, "Discardable EP section");
+
+
+
+
+    // A valid physical EP in executable code contradicts a zero SizeOfCode header value.
+
+    var isUnreportedCodePresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        entryPointSectionIndex !== -1 && PE.isEntryPointCorrect() &&
+        PE.getSectionFileSize(entryPointSectionIndex) !== 0 &&
+        (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_EXECUTE) &&
+        PE.getSizeOfCode() === 0) {
+        isUnreportedCodePresent = true;
+    }
+
+    if (isUnreportedCodePresent) options = addOption(options, "Unreported code");
 
 
 
