@@ -2474,14 +2474,7 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
         ["NecroVM", null, ["VmLoad", "necro", "lz"]]
     ];
 
-    var objectNamesValidatingResult = null;
-
-    for (var i = 0; i < dbCollectionOfObjectNamesDict.length; i++) {
-        if (isAllNetObjectsPresent(dbCollectionOfObjectNamesDict[i][2])) {
-            objectNamesValidatingResult = dbCollectionOfObjectNamesDict[i];
-            break;
-        }
-    }
+    const objectNamesValidatingResult = validateNetObjectNames(dbCollectionOfObjectNamesDict);
 
     var versionByObjectNameDetected = String();
 
@@ -3074,7 +3067,6 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
         ["WibuKey", null, ".wibu"],
         ["Wibu CodeMeter", null, /^__wibu0[01]$/],
         ["AverCryptor", "1.0-1.02", [".avc", ".Polyene"]],
-        ["Morphnah", "1.0.X", ".nah"],
         ["TSULoader", null, ".tsustub"],
         ["RPCrypt", null, /^\.R(Cryptor|PCrypt)$/],
         ["ExE Pack", null, ["!EPack", ".!ep"]],
@@ -7581,6 +7573,34 @@ function validateResourceNames(dbCollection) {
     }
 
     return result;
+}
+
+
+
+
+/**
+ * Matches complete .NET object-name collections against a signature database collection.
+ *
+ * Regular expressions are intentionally unsupported: every string in the collection stored
+ * at index 2 must identify an exact metadata object, and every object must be present.
+ * Entries with more than three fields are reported as malformed.
+ *
+ * @param {Array} dbCollection - The database collection to validate, where each item is expected to have an object-name collection at index 2.
+ * @returns {Array|null} The first matching item from the collection, or null if no match is found.
+ * @example
+ * validateNetObjectNames([["ConfuserEx", null, ["Decrypt", "LzmaDecoder"]]]);
+ */
+function validateNetObjectNames(dbCollection) {
+    for (var i = 0; i < dbCollection.length; i++) {
+        if (dbCollection[i].length > 3) {
+            stdout(">>> Invalid .NET object signature entry for \"" + dbCollection[i][0] + "\": expected 3 elements, but found " + dbCollection[i].length + ". Extra signatures will be ignored. Use [ and ] to define an object-name collection. <<<");
+        }
+
+        var objectNames = dbCollection[i][2];
+        if (Array.isArray(objectNames) && isAllNetObjectsPresent(objectNames)) return dbCollection[i];
+    }
+
+    return null;
 }
 
 
