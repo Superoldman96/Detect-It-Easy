@@ -4992,8 +4992,20 @@ function scanForObfuscations_Native() {
                 syntheticEpKnownAddresses[registerLiteralAddress[1].toUpperCase().replace(epRegister32BitSuffixPattern, "")] = registerLiteralAddress[2];
                 syntheticEpNeutralInstructionCount = 0;
             } else if (registerCopy && syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, "")]) {
-                // Preserve provenance through a plain register-to-register copy.
-                syntheticEpKnownAddresses[registerCopy[1].toUpperCase().replace(epRegister32BitSuffixPattern, "")] = syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, "")];
+                // Preserve provenance through a plain register-to-register copy. A 32-bit
+                // destination zero-extends the truncated value, so validate that VA again.
+                const registerCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitSuffixPattern, "");
+                var registerCopySourceAddress = syntheticEpKnownAddresses[registerCopy[2].toUpperCase().replace(epRegister32BitSuffixPattern, "")];
+
+                if (epRegister32BitSuffixPattern.test(registerCopy[1])) {
+                    registerCopySourceAddress = (parseInt(registerCopySourceAddress, 0) >>> 0).toString();
+                }
+
+                if (PE.VAToOffset(parseInt(registerCopySourceAddress, 0)) !== -1) {
+                    syntheticEpKnownAddresses[registerCopyDestination] = registerCopySourceAddress;
+                } else {
+                    delete syntheticEpKnownAddresses[registerCopyDestination];
+                }
                 syntheticEpNeutralInstructionCount = 0;
             } else if (poppedRegister && syntheticEpTargetAddress) {
                 // PUSH <VA>; POP reg is a common polymorphic spelling of MOV reg, <VA>.
