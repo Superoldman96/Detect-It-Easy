@@ -135,8 +135,9 @@ function main() {
             scanForObfuscations_NET();
             scanForAntiAnalysis_NET();
         } else {
-            // Detection of anomalies specific to Native
+            // Detection of obfuscation and anti-analysis techniques specific to Native
             scanForObfuscations_Native();
+            scanForAntiAnalysis_Native();
         }
 
         // Detection of anomalies most commonly found in packers, cryptors, protectors...
@@ -267,12 +268,14 @@ function initializeCache() {
     var cacheMap = {
         /* Computed values */
         /* Number  */ fileBodySize: function () { return PE.getSize() - PE.getOverlaySize() - PE.getDosStubOffset() - PE.getDosStubSize(); },
+        /* Number  */ fileSubsystem: function () { return PE.getImageOptionalHeader("Subsystem"); },
         /* RegExp  */ obfuscationWhitelist: function () { return new RegExp(obfuscationWhitelistSources.join("|")); },
         /* RegExp  */ obfuscationWhitelistInsensitive: function () { return new RegExp(obfuscationWhitelistInsensitiveSources.join("|"), "i"); },
         /* Native functions */
         /* Boolean */ is64bit: PE["is64"],
         /* Boolean */ isDotNet: PE["isNet"],
         /* Boolean */ isDynamicLinkLibrary: PE["isDll"],
+        /* Boolean */ isDriver: PE["isDriver"],
         /* Boolean */ isNetGlobalCctorPresent: PE["isNetGlobalCctorPresent"],
         /* Boolean */ isRichSignaturePresent: PE["isRichSignaturePresent"],
         /* Number  */ addressOfUnmanagedEntryPoint: PE["getAddressOfEntryPoint"],
@@ -1617,6 +1620,13 @@ function scanForAntiAnalysis_NET() {
 }
 // #endregion
 
+
+
+// #region "anti-analysis (Native)"
+function scanForAntiAnalysis_Native() {
+    log(logType.nothing, "Scanning for anti-analysis tricks...");
+}
+// #endregion
 
 
 
@@ -4895,7 +4905,7 @@ function scanForObfuscations_Native() {
                 "B", "BL", "BLR", "BR", "BRK", "BX", "CALL", "CBNZ", "CBZ", "ERET",
                 "HLT", "HVC", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
                 "JMP", "JMPF", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ", "RET",
-                "RETF", "RETN", "SMC", "SVC", "SYSENTER", "SYSRET", "SYSEXIT", "TBNZ",
+                "RETF", "RETN", "SMC", "SVC", "SYSCALL", "SYSENTER", "SYSRET", "SYSEXIT", "TBNZ",
                 "TBZ", "UD2"
             ];
 
@@ -4948,12 +4958,13 @@ function scanForObfuscations_Native() {
         // This trick uses "CALL $+5" (E8 00 00 00 00) to push next instruction address on stack
         if (!PE_Cached.isDynamicLinkLibrary) {
             for (var i = 0; i < 32 && !isAddrToStackTrickPresent; i++) {
-                var currentInstruction = emulateAndGetAsmInstructionByIndex(i);
+                var currentInstruction = emulateAndGetAsmInstructionByIndex(i),
+                    addrToStackOpCode = getAsmOpCode(currentInstruction);
 
                 if (!currentInstruction) break; // Safety check
 
                 // Check if instruction is CALL
-                if (getAsmOpCode(currentInstruction) === "CALL") {
+                if (addrToStackOpCode === "CALL") {
                     // Get address and offset for this instruction
                     var disasmAddress = PE_Cached.addressOfUnmanagedEntryPoint;
 
@@ -4970,6 +4981,9 @@ function scanForObfuscations_Native() {
                         isAddrToStackTrickPresent = true;
                     }
                 }
+
+                // Do not inspect bytes which cannot execute after a hard control-flow transfer.
+                if (/^(?:HLT|INT(?:1|3|O)?|IRET(?:D|Q)?|JMPF?|LOOP(?:E|NE|NZ|Z)?|RET(?:F|N)?|SYS(?:CALL|ENTER|RET|EXIT)|UD2)$/.test(addrToStackOpCode)) break;
             }
         }
     }
@@ -4996,15 +5010,18 @@ function scanForObfuscations_Native() {
         // Capture 1 belongs to MOV/XCHG and capture 2 to LEA. Consumers deliberately use
         // match[1] || match[2] to obtain the affected register from either alternative.
         epSimplePolymorphicInstructionPattern = new RegExp("^(?:MOV|XCHG) (" + epFlagsGeneralPurposeRegister + "), \\1$|^LEA (" + epGeneralPurposeRegister + "), \\[\\2\\]$", "i"),
-        epConditionalBranchPattern = /^(J[A-Z]+) (0X[0-9A-F]+|\d+)$/i,
+        // These operations preserve the destination value while permitting an obfuscator
+        // to vary both instruction spelling and EFLAGS side effects.
+        epValuePreservingInstructionPattern = new RegExp("^(?:ADD|SUB|OR|XOR|SHL|SHR|SAR|ROL|ROR) (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+)$|^IMUL (" + epGeneralPurposeRegister + "), \\2, (?:0X0*1|1)$", "i"),
+        epConditionalBranchPattern = /^(J(?!MP)[A-Z]+) (0X[0-9A-F]+|\d+)$/i,
         epDirectJumpPattern = /^JMP (0X[0-9A-F]+|\d+)$/i,
         epStackRoundTripPushPattern = new RegExp("^PUSH (" + epFlagsGeneralPurposeRegister + ")$", "i"),
         epStackRoundTripPopPattern = new RegExp("^POP (" + epFlagsGeneralPurposeRegister + ")$", "i"),
         epReversibleBinaryPattern = new RegExp("^(XOR|ADD|SUB) (" + epFlagsGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
         epReversibleUnaryPattern = new RegExp("^(NOT|NEG|BSWAP) (" + epFlagsGeneralPurposeRegister + ")$", "i"),
-        epLiteralMovePattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
+        epLiteralMovePattern = new RegExp("^MOV(?:ABS)? (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
         epLiteralComparePattern = new RegExp("^CMP (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
-        epFlagsNeutralRegisterWritePattern = new RegExp("^(?:MOV|MOVZX|MOVSX|LEA) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
+        epFlagsNeutralRegisterWritePattern = new RegExp("^(?:MOV(?:ABS)?|MOVZX|MOVSX|MOVSXD|LEA) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
         epTrackedRegisterWritePattern = new RegExp("^(?:XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
         epNeutralInstructionLimit = 4,
         epMaximumSafeInteger = 0x1FFFFFFFFFFFFF,
@@ -5027,7 +5044,7 @@ function scanForObfuscations_Native() {
         epScanStopOpCodes = [
             "CALL", "HLT", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
             "JMP", "JMPF", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ", "RET",
-            "RETF", "RETN", "SYSENTER", "SYSRET", "SYSEXIT", "UD2"
+            "RETF", "RETN", "SYSCALL", "SYSENTER", "SYSRET", "SYSEXIT", "UD2"
         ];
 
 
@@ -5066,7 +5083,7 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode) break; // Safety check
 
             // Extract only register forms whose value can be followed without emulation.
-            var registerLiteralAddress = currentEpInstruction.match(new RegExp("^MOV (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i")),
+            var registerLiteralAddress = currentEpInstruction.match(new RegExp("^MOV(?:ABS)? (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i")),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
                 pushedRegister = currentEpInstruction.match(new RegExp("^PUSH (" + epGeneralPurposeRegister + ")$", "i")),
                 storedRegister = currentEpInstruction.match(new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i")),
@@ -5077,9 +5094,12 @@ function scanForObfuscations_Native() {
                 stackPivotAddress = PE_Cached.isI386 ? currentEpInstruction.match(/^MOV ESP, (0X[0-9A-F]+|\d+)$/i) : null,
                 targetAddress = pushedAddress || storedAddress,
                 targetAddressValue = targetAddress ? parseInt(targetAddress[1], 0) : -1,
-                registerWrite = currentEpInstruction.match(new RegExp("^(?:MOV|LEA|XOR|ADD|SUB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
+                registerWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern) ||
+                    currentEpInstruction.match(epTrackedRegisterWritePattern),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
                 simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
                 simplePolymorphicRegister = simplePolymorphicInstruction ? (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) : String(),
+                valuePreservingInstruction = currentEpInstruction.match(epValuePreservingInstructionPattern),
                 isNeutralInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
                     currentEpOpCode === "PAUSE" || currentEpOpCode === "CLC" ||
                     currentEpOpCode === "STC" || currentEpOpCode === "CMC" ||
@@ -5155,12 +5175,33 @@ function scanForObfuscations_Native() {
             } else if (isNeutralInstruction && syntheticEpNeutralInstructionCount < epNeutralInstructionLimit) {
                 // Permit limited stack-preserving junk commonly inserted by protectors.
                 syntheticEpNeutralInstructionCount++;
+            } else if (simplePolymorphicInstruction) {
+                // A PE32+ r32 self-operation zero-extends only its physical register.
+                // Preserve unrelated address proofs and any proven top-of-stack target.
+                var simplePolymorphicRegisterKey = (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                delete syntheticEpKnownAddresses[simplePolymorphicRegisterKey];
+            } else if (valuePreservingInstruction) {
+                var valuePreservingRegister = (valuePreservingInstruction[1] || valuePreservingInstruction[2]).toUpperCase(),
+                    valuePreservingRegisterKey = valuePreservingRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    valuePreservingAddress = syntheticEpKnownAddresses[valuePreservingRegisterKey];
+
+                if (valuePreservingAddress !== undefined && PE_Cached.is64bit && epRegister32BitPattern.test(valuePreservingRegister)) {
+                    valuePreservingAddress = (parseInt(valuePreservingAddress, 0) >>> 0).toString();
+
+                    if (PE.VAToOffset(parseInt(valuePreservingAddress, 0)) !== -1) {
+                        syntheticEpKnownAddresses[valuePreservingRegisterKey] = valuePreservingAddress;
+                    } else {
+                        delete syntheticEpKnownAddresses[valuePreservingRegisterKey];
+                    }
+                }
             } else if (registerWrite) {
                 // An unrelated register write cannot invalidate other proven addresses.
                 // Remove only the overwritten register instead of discarding all provenance.
                 delete syntheticEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
-            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]+$/.test(currentEpOpCode)) {
-                // Do not linearly join instructions from a subsequent basic block.
+            } else if (conditionalBranch || /^(?:CMP|TEST)$/.test(currentEpOpCode)) {
+                // Register and stack provenance survives on the physical fall-through path.
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1) {
                 break;
             } else {
                 // Any other instruction can alter stack/register state, so discard provenance.
@@ -5476,10 +5517,12 @@ function scanForObfuscations_Native() {
             var reversibleBinaryInstruction = currentEpInstruction.match(epReversibleBinaryPattern),
                 reversibleUnaryInstruction = currentEpInstruction.match(epReversibleUnaryPattern),
                 simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                simplePolymorphicRegister = simplePolymorphicInstruction ?
+                    (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) : String(),
                 isSafeReversiblePadding = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
                     currentEpOpCode === "PAUSE" ||
-                    (simplePolymorphicInstruction && reversibleEpRegister ===
-                        (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase());
+                    (simplePolymorphicInstruction &&
+                        !(PE_Cached.is64bit && epRegister32BitPattern.test(simplePolymorphicRegister)));
 
             // A candidate is valid only when the second operation has the same width,
             // register and literal. Safely representable literals are parsed so equivalent
@@ -5529,8 +5572,9 @@ function scanForObfuscations_Native() {
                 }
             } else if (isSafeReversiblePadding && reversibleEpOpCode &&
                 reversibleEpNeutralInstructionCount < epNeutralInstructionLimit) {
-                // Self-moves on the tracked register and architectural NOP/PAUSE instructions
-                // preserve its value; the small limit prevents pairing unrelated arithmetic.
+                // Full-width self-moves on any register and architectural NOP/PAUSE
+                // instructions are globally neutral. PE32+ r32 self-moves are excluded
+                // because their implicit zero-extension changes the physical register.
                 reversibleEpNeutralInstructionCount++;
             } else {
                 reversibleEpOpCode = String();
@@ -5574,6 +5618,7 @@ function scanForObfuscations_Native() {
                 flagsNeutralRegisterWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern),
                 registerWrite = currentEpInstruction.match(epTrackedRegisterWritePattern),
                 simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                valuePreservingInstruction = currentEpInstruction.match(epValuePreservingInstructionPattern),
                 isSimplePolymorphicInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
                     currentEpOpCode === "PAUSE" ||
                     simplePolymorphicInstruction;
@@ -5604,7 +5649,8 @@ function scanForObfuscations_Native() {
                 }
 
                 break;
-            } else if (literalMove || registerCopy || flagsNeutralRegisterWrite || isSimplePolymorphicInstruction) {
+            } else if (literalMove || registerCopy || flagsNeutralRegisterWrite ||
+                isSimplePolymorphicInstruction || valuePreservingInstruction) {
                 // Propagate only operations whose destination value is statically known.
                 // Other flags-neutral writes invalidate their destination without discarding
                 // unrelated register facts accumulated earlier in the linear block.
@@ -5621,16 +5667,16 @@ function scanForObfuscations_Native() {
                         delete constantEpKnownRegisterValues[literalMoveRegister];
                     }
                 } else if (registerCopy) {
-                    var registerCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
-                        registerCopySource = registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+                    var constantEpRegisterCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                        constantEpRegisterCopySource = registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
 
-                    if (constantEpKnownRegisterValues[registerCopySource] !== undefined) {
-                        var registerCopyValue = constantEpKnownRegisterValues[registerCopySource];
+                    if (constantEpKnownRegisterValues[constantEpRegisterCopySource] !== undefined) {
+                        var registerCopyValue = constantEpKnownRegisterValues[constantEpRegisterCopySource];
 
                         if (epRegister32BitPattern.test(registerCopy[1])) registerCopyValue = registerCopyValue >>> 0;
-                        constantEpKnownRegisterValues[registerCopyDestination] = registerCopyValue;
+                        constantEpKnownRegisterValues[constantEpRegisterCopyDestination] = registerCopyValue;
                     } else {
-                        delete constantEpKnownRegisterValues[registerCopyDestination];
+                        delete constantEpKnownRegisterValues[constantEpRegisterCopyDestination];
                     }
                 } else if (simplePolymorphicInstruction) {
                     var simplePolymorphicRegister = (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase(),
@@ -5639,11 +5685,23 @@ function scanForObfuscations_Native() {
                     if (constantEpKnownRegisterValues[simplePolymorphicRegisterKey] !== undefined && epRegister32BitPattern.test(simplePolymorphicRegister)) {
                         constantEpKnownRegisterValues[simplePolymorphicRegisterKey] = constantEpKnownRegisterValues[simplePolymorphicRegisterKey] >>> 0;
                     }
+                } else if (valuePreservingInstruction) {
+                    var valuePreservingRegister = (valuePreservingInstruction[1] || valuePreservingInstruction[2]).toUpperCase(),
+                        valuePreservingRegisterKey = valuePreservingRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                    if (constantEpKnownRegisterValues[valuePreservingRegisterKey] !== undefined && epRegister32BitPattern.test(valuePreservingRegister)) {
+                        constantEpKnownRegisterValues[valuePreservingRegisterKey] = constantEpKnownRegisterValues[valuePreservingRegisterKey] >>> 0;
+                    }
                 } else if (flagsNeutralRegisterWrite && !isSimplePolymorphicInstruction) {
                     delete constantEpKnownRegisterValues[flagsNeutralRegisterWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
                 }
 
-                if (constantEpComparisonOrigin && ++constantEpNeutralInstructionCount > epNeutralInstructionLimit) {
+                if (valuePreservingInstruction) {
+                    // Value-preserving arithmetic may still replace EFLAGS. Keep register
+                    // provenance but require a fresh CMP before accepting a later Jcc.
+                    constantEpComparisonOrigin = String();
+                    constantEpNeutralInstructionCount = 0;
+                } else if (constantEpComparisonOrigin && ++constantEpNeutralInstructionCount > epNeutralInstructionLimit) {
                     constantEpComparisonOrigin = String();
                     constantEpNeutralInstructionCount = 0;
                 }
@@ -5681,20 +5739,24 @@ function scanForObfuscations_Native() {
     if (PE_Cached.isArchX86) {
         for (var x = 0; x < strangeOpCodesNearEp.length; x++) {
             const opCodeToCheck = strangeOpCodesNearEp[x];
-            // Check first 15 instructions for CPUID instruction
+            // Check the first 15 instructions for the current unusual opcode.
             if (!PE_Cached.isDynamicLinkLibrary) {
                 for (var i = 0; i < 15 && !isStrangeOpCodeNearEpPresent; i++) {
                     var asmInstruction = emulateAndGetAsmInstructionByIndex(i);
 
                     if (!asmInstruction) break; // Safety check
 
-                    // Check if instruction is CPUID
-                    if (getAsmOpCode(asmInstruction) === opCodeToCheck) {
+                    var currentEpOpCode = getAsmOpCode(asmInstruction);
+
+                    // Check whether the instruction matches the requested opcode.
+                    if (currentEpOpCode === opCodeToCheck) {
                         log(logType.any, opCodeToCheck + " near EP found at instruction index: " + i);
 
                         strangeOpCodeDetected = opCodeToCheck;
 
                         isStrangeOpCodeNearEpPresent = true;
+                    } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                        break;
                     }
                 }
             }
