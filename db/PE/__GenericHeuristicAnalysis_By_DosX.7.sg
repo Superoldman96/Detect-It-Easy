@@ -5848,6 +5848,104 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for manual module enumeration through PEB->Ldr loader lists near the entry point.
+
+    var isPebModuleWalkPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const pebModuleWalkNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
+                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            pebModuleWalkSegment = PE_Cached.isI386 ? "FS" : "GS",
+            pebModuleWalkPebAddress = PE_Cached.isI386 ? "(?:0X0*30|48)" : "(?:0X0*60|96)",
+            pebModuleWalkLdrOffset = PE_Cached.isI386 ? "(?:0X0*C|12)" : "(?:0X0*18|24)",
+            pebModuleWalkListOffset = PE_Cached.isI386 ? "(?:0X0*(?:C|14|1C)|12|20|28)" :
+                "(?:0X0*(?:10|20|30)|16|32|48)",
+            pebModuleWalkPebLoadPattern = new RegExp("^MOV (" + pebModuleWalkNativeRegister + "), (?:(?:DWORD|QWORD) PTR )?" + pebModuleWalkSegment + ":\\[" + pebModuleWalkPebAddress + "\\]$", "i"),
+            pebModuleWalkLdrLoadPattern = new RegExp("^MOV (" + pebModuleWalkNativeRegister + "), (?:(?:DWORD|QWORD) PTR )?\\[(" + pebModuleWalkNativeRegister + ") ?\\+ ?" + pebModuleWalkLdrOffset + "\\]$", "i"),
+            pebModuleWalkListLoadPattern = new RegExp("^MOV (" + pebModuleWalkNativeRegister + "), (?:(?:DWORD|QWORD) PTR )?\\[(" + pebModuleWalkNativeRegister + ") ?\\+ ?" + pebModuleWalkListOffset + "\\]$", "i");
+
+        // State 1 proves a PEB pointer and state 2 proves its PEB_LDR_DATA pointer.
+        // Copies preserve the proof, while writes invalidate only their physical register.
+        // Unknown instructions discard all proofs but may begin a new chain later.
+        var pebModuleWalkRegisterStates = {};
+
+        for (var i = 0; i < 256 && !isPebModuleWalkPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var pebPointerLoad = currentEpInstruction.match(pebModuleWalkPebLoadPattern),
+                ldrPointerLoad = currentEpInstruction.match(pebModuleWalkLdrLoadPattern),
+                moduleListLoad = currentEpInstruction.match(pebModuleWalkListLoadPattern),
+                registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                valuePreservingInstruction = currentEpInstruction.match(epValuePreservingInstructionPattern),
+                registerWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern) ||
+                    currentEpInstruction.match(epTrackedRegisterWritePattern),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern);
+
+            if (pebPointerLoad) {
+                var pebRegister = pebPointerLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                pebModuleWalkRegisterStates[pebRegister] = 1;
+            } else if (moduleListLoad && pebModuleWalkRegisterStates[moduleListLoad[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] === 2) {
+                log(logType.any, "PEB loader module-list walk near EP: " + currentEpInstruction);
+
+                isPebModuleWalkPresent = true;
+            } else if (ldrPointerLoad) {
+                var ldrDestinationRegister = ldrPointerLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    ldrSourceRegister = ldrPointerLoad[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                if (pebModuleWalkRegisterStates[ldrSourceRegister] === 1) {
+                    pebModuleWalkRegisterStates[ldrDestinationRegister] = 2;
+                } else {
+                    delete pebModuleWalkRegisterStates[ldrDestinationRegister];
+                }
+            } else if (moduleListLoad) {
+                delete pebModuleWalkRegisterStates[moduleListLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+            } else if (registerCopy) {
+                var pebModuleWalkCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    pebModuleWalkCopySource = registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                // A PE32+ r32 destination destroys a 64-bit PEB/Ldr pointer by zero-extension.
+                if (PE_Cached.is64bit && epRegister32BitPattern.test(registerCopy[1])) {
+                    delete pebModuleWalkRegisterStates[pebModuleWalkCopyDestination];
+                } else if (pebModuleWalkRegisterStates[pebModuleWalkCopySource] !== undefined) {
+                    pebModuleWalkRegisterStates[pebModuleWalkCopyDestination] = pebModuleWalkRegisterStates[pebModuleWalkCopySource];
+                } else {
+                    delete pebModuleWalkRegisterStates[pebModuleWalkCopyDestination];
+                }
+            } else if (simplePolymorphicInstruction || valuePreservingInstruction) {
+                var pebModuleWalkPreservingRegister = (simplePolymorphicInstruction ?
+                        (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) :
+                        (valuePreservingInstruction[1] || valuePreservingInstruction[2])).toUpperCase(),
+                    pebModuleWalkPreservingRegisterKey = pebModuleWalkPreservingRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                if (PE_Cached.is64bit && epRegister32BitPattern.test(pebModuleWalkPreservingRegister)) {
+                    delete pebModuleWalkRegisterStates[pebModuleWalkPreservingRegisterKey];
+                }
+            } else if (currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
+                currentEpOpCode === "PAUSE" || currentEpOpCode === "CLC" ||
+                currentEpOpCode === "STC" || currentEpOpCode === "CMC" ||
+                conditionalBranch || /^(?:CMP|TEST)$/.test(currentEpOpCode)) {
+                // These instructions preserve every proven pointer on the fall-through path.
+            } else if (registerWrite) {
+                delete pebModuleWalkRegisterStates[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+            } else {
+                pebModuleWalkRegisterStates = {};
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
+            }
+        }
+    }
+
+    if (isPebModuleWalkPresent) options = addOption(options, "PEB module walk near EP");
+
+
+
+
     // Check for the x87 environment trick used by 32-bit shellcode to recover its EIP.
 
     var isFpuEpRecoveryPresent = false;
