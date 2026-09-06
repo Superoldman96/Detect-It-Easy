@@ -5418,6 +5418,108 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for comparisons against a statically proven identical register literal.
+
+    var isConstantOpaqueEpComparisonPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && PE_Cached.isArchX86) {
+        var constantEpKnownRegisterValues = {},
+            constantEpComparisonOrigin = String(),
+            constantEpNeutralInstructionCount = 0;
+
+        for (var i = 0; i < 128 && !isConstantOpaqueEpComparisonPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var literalMove = currentEpInstruction.match(epLiteralMovePattern),
+                registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
+                literalCompare = currentEpInstruction.match(epLiteralComparePattern),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
+                flagsNeutralRegisterWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern),
+                registerWrite = currentEpInstruction.match(epTrackedRegisterWritePattern),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                isSimplePolymorphicInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
+                    simplePolymorphicInstruction;
+
+            if (literalCompare) {
+                var comparedRegister = literalCompare[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    comparedLiteral = parseInt(literalCompare[2], 0),
+                    knownComparedLiteral = constantEpKnownRegisterValues[comparedRegister];
+
+                if (knownComparedLiteral !== undefined && epRegister32BitPattern.test(literalCompare[1])) knownComparedLiteral = knownComparedLiteral >>> 0;
+
+                if (comparedLiteral <= 0x7FFFFFFF && knownComparedLiteral === comparedLiteral) {
+                    constantEpComparisonOrigin = currentEpInstruction;
+                    constantEpNeutralInstructionCount = 0;
+                } else {
+                    constantEpComparisonOrigin = String();
+                    constantEpNeutralInstructionCount = 0;
+                }
+            } else if (conditionalBranch) {
+                if (constantEpComparisonOrigin && PE.VAToOffset(parseInt(conditionalBranch[2], 0)) !== -1 &&
+                    (epZeroFlagsAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ||
+                        epZeroFlagsNeverTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1)) {
+                    log(logType.any, "Constant opaque comparison near EP: " + constantEpComparisonOrigin + "; " + currentEpInstruction);
+
+                    isConstantOpaqueEpComparisonPresent = true;
+                }
+
+                break;
+            } else if (literalMove || registerCopy || flagsNeutralRegisterWrite || isSimplePolymorphicInstruction) {
+                if (literalMove) {
+                    var literalMoveRegister = literalMove[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                        literalMoveValue = parseInt(literalMove[2], 0);
+
+                    if (epRegister32BitPattern.test(literalMove[1])) literalMoveValue = literalMoveValue >>> 0;
+                    constantEpKnownRegisterValues[literalMoveRegister] = literalMoveValue;
+                } else if (registerCopy) {
+                    var registerCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                        registerCopySource = registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                    if (constantEpKnownRegisterValues[registerCopySource] !== undefined) {
+                        var registerCopyValue = constantEpKnownRegisterValues[registerCopySource];
+
+                        if (epRegister32BitPattern.test(registerCopy[1])) registerCopyValue = registerCopyValue >>> 0;
+                        constantEpKnownRegisterValues[registerCopyDestination] = registerCopyValue;
+                    } else {
+                        delete constantEpKnownRegisterValues[registerCopyDestination];
+                    }
+                } else if (simplePolymorphicInstruction) {
+                    var simplePolymorphicRegister = (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase(),
+                        simplePolymorphicRegisterKey = simplePolymorphicRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+
+                    if (constantEpKnownRegisterValues[simplePolymorphicRegisterKey] !== undefined && epRegister32BitPattern.test(simplePolymorphicRegister)) {
+                        constantEpKnownRegisterValues[simplePolymorphicRegisterKey] = constantEpKnownRegisterValues[simplePolymorphicRegisterKey] >>> 0;
+                    }
+                } else if (flagsNeutralRegisterWrite && !isSimplePolymorphicInstruction) {
+                    delete constantEpKnownRegisterValues[flagsNeutralRegisterWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+                }
+
+                if (constantEpComparisonOrigin && ++constantEpNeutralInstructionCount > epNeutralInstructionLimit) {
+                    constantEpComparisonOrigin = String();
+                    constantEpNeutralInstructionCount = 0;
+                }
+            } else if (registerWrite) {
+                delete constantEpKnownRegisterValues[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+                constantEpComparisonOrigin = String();
+                constantEpNeutralInstructionCount = 0;
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1) {
+                break;
+            } else {
+                constantEpKnownRegisterValues = {};
+                constantEpComparisonOrigin = String();
+                constantEpNeutralInstructionCount = 0;
+            }
+        }
+    }
+
+    if (isConstantOpaqueEpComparisonPresent) options = addOption(options, "Constant opaque comparison near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
