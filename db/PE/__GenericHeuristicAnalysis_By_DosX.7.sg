@@ -5230,6 +5230,75 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for conditional branches whose taken and fall-through paths are equivalent.
+
+    var isDegenerateEpConditionalBranchPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && PE_Cached.isArchX86) {
+        var degenerateEpBranchOpCode = String(),
+            degenerateEpBranchTarget = -1,
+            degenerateEpNeutralInstructionCount = 0,
+            degenerateEpCurrentAddress = PE_Cached.addressOfUnmanagedEntryPoint;
+
+        for (var i = 0; i < 64 && !isDegenerateEpConditionalBranchPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction),
+                nextEpInstructionAddress = PE.getDisasmNextAddress(degenerateEpCurrentAddress);
+
+            if (!currentEpOpCode || nextEpInstructionAddress === -1) break; // Safety check
+
+            var conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
+                directJump = currentEpInstruction.match(epDirectJumpPattern),
+                isSimplePolymorphicInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
+                    epSimplePolymorphicInstructionPattern.test(currentEpInstruction);
+
+            if (conditionalBranch && currentEpOpCode !== "JMP") {
+                var currentBranchTarget = parseInt(conditionalBranch[2], 0),
+                    currentCanonicalBranchOpCode = epCanonicalBranchOpCodes[currentEpOpCode] || currentEpOpCode,
+                    previousCanonicalBranchOpCode = epCanonicalBranchOpCodes[degenerateEpBranchOpCode] || degenerateEpBranchOpCode,
+                    branchPair = previousCanonicalBranchOpCode + ":" + currentCanonicalBranchOpCode,
+                    reverseBranchPair = currentCanonicalBranchOpCode + ":" + previousCanonicalBranchOpCode;
+
+                if (currentBranchTarget === nextEpInstructionAddress ||
+                    (currentBranchTarget === degenerateEpBranchTarget && PE.VAToOffset(currentBranchTarget) !== -1 &&
+                        (epComplementaryBranchPairs.indexOf(branchPair) !== -1 || epComplementaryBranchPairs.indexOf(reverseBranchPair) !== -1))) {
+                    log(logType.any, "Degenerate conditional branch near EP: " + currentEpInstruction);
+
+                    isDegenerateEpConditionalBranchPresent = true;
+                } else {
+                    degenerateEpBranchOpCode = currentEpOpCode;
+                    degenerateEpBranchTarget = currentBranchTarget;
+                    degenerateEpNeutralInstructionCount = 0;
+                }
+            } else if (directJump) {
+                if (degenerateEpBranchOpCode && degenerateEpBranchTarget === parseInt(directJump[1], 0) &&
+                    PE.VAToOffset(degenerateEpBranchTarget) !== -1) {
+                    log(logType.any, "Degenerate conditional branch near EP: " + currentEpInstruction);
+
+                    isDegenerateEpConditionalBranchPresent = true;
+                }
+
+                break;
+            } else if (isSimplePolymorphicInstruction && degenerateEpBranchOpCode &&
+                degenerateEpNeutralInstructionCount < epNeutralInstructionLimit) {
+                degenerateEpNeutralInstructionCount++;
+            } else {
+                degenerateEpBranchOpCode = String();
+                degenerateEpBranchTarget = -1;
+                degenerateEpNeutralInstructionCount = 0;
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]+$/.test(currentEpOpCode)) break;
+            }
+
+            degenerateEpCurrentAddress = nextEpInstructionAddress;
+        }
+    }
+
+    if (isDegenerateEpConditionalBranchPresent) options = addOption(options, "Degenerate conditional branch near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
