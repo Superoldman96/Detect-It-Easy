@@ -6011,6 +6011,179 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check whether a direct branch enters the middle of another decoded instruction.
+
+    var isOverlappingEpCodePresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        var overlappingEpInstructionStarts = {},
+            overlappingEpBranchTargets = [],
+            overlappingEpCurrentAddress = PE_Cached.addressOfUnmanagedEntryPoint,
+            overlappingEpScannedEndAddress = overlappingEpCurrentAddress;
+
+        // This rule deliberately performs a physical linear sweep instead of following
+        // getDisasmNextAddress(). Every decoded byte belongs to exactly one instruction in
+        // the fall-through stream; a direct target inside one of those byte ranges proves
+        // an alternate overlapping decode. Targets outside the bounded sweep are ignored.
+
+        for (var i = 0; i < 256; i++) {
+            var currentEpInstruction = PE.getDisasmString(overlappingEpCurrentAddress),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction),
+                currentEpInstructionLength = PE.getDisasmLength(overlappingEpCurrentAddress);
+
+            if (!currentEpOpCode || currentEpInstructionLength <= 0) break; // Safety check
+
+            overlappingEpInstructionStarts[overlappingEpCurrentAddress.toString()] = true;
+            overlappingEpScannedEndAddress = overlappingEpCurrentAddress + currentEpInstructionLength;
+
+            var directControlFlow = currentEpInstruction.match(/^(?:CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
+
+            if (directControlFlow) {
+                var directControlFlowTarget = parseInt(directControlFlow[1], 0);
+
+                if (PE.VAToOffset(directControlFlowTarget) !== -1) {
+                    overlappingEpBranchTargets.push(directControlFlowTarget);
+                }
+            }
+
+            // Calls and conditional jumps have a valid fall-through path. Terminal and
+            // unconditional transfers end the linear byte stream before embedded data.
+            if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
+
+            overlappingEpCurrentAddress = overlappingEpScannedEndAddress;
+        }
+
+        for (var i = 0; i < overlappingEpBranchTargets.length && !isOverlappingEpCodePresent; i++) {
+            var overlappingEpBranchTarget = overlappingEpBranchTargets[i];
+
+            if (overlappingEpBranchTarget >= PE_Cached.addressOfUnmanagedEntryPoint &&
+                overlappingEpBranchTarget < overlappingEpScannedEndAddress &&
+                !overlappingEpInstructionStarts[overlappingEpBranchTarget.toString()]) {
+                log(logType.any, "Overlapping branch target near EP: 0x" + overlappingEpBranchTarget.toString(16));
+
+                isOverlappingEpCodePresent = true;
+            }
+        }
+    }
+
+    if (isOverlappingEpCodePresent) options = addOption(options, "Overlapping code near EP");
+
+
+
+
+    // Check for an image address materialized in a register and used as an indirect transfer.
+
+    var isIndirectEpTransferPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const indirectEpTransferPattern = new RegExp("^(JMP|CALL) (" + epGeneralPurposeRegister + ")$", "i"),
+            indirectEpRegisterWritePattern = new RegExp("^(?:MOV(?:ABS)?|MOVZX|MOVSX|MOVSXD|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i");
+
+        // Multiple proven addresses are retained because polymorphic junk commonly writes
+        // unrelated registers between materialization and transfer. Every write invalidates
+        // only its physical destination; calls and unknown instructions discard all proofs.
+        var indirectEpKnownAddresses = {};
+
+        for (var i = 0; i < 256 && !isIndirectEpTransferPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var registerLiteralAddress = currentEpInstruction.match(epLiteralMovePattern),
+                registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
+                indirectTransfer = currentEpInstruction.match(indirectEpTransferPattern),
+                registerWrite = currentEpInstruction.match(indirectEpRegisterWritePattern),
+                conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                simplePolymorphicRegister = simplePolymorphicInstruction ? (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]) : String(),
+                valuePreservingInstruction = currentEpInstruction.match(epValuePreservingInstructionPattern),
+                isNeutralInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
+                    currentEpOpCode === "PAUSE" ||
+                    (simplePolymorphicInstruction && !(PE_Cached.is64bit && epRegister32BitPattern.test(simplePolymorphicRegister)));
+
+            if (registerLiteralAddress) {
+                var indirectEpTargetRegister = registerLiteralAddress[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    indirectEpTargetAddress = parseInt(registerLiteralAddress[2], 0);
+
+                if (indirectEpTargetAddress <= epMaximumSafeInteger) {
+                    if (epRegister32BitPattern.test(registerLiteralAddress[1])) indirectEpTargetAddress = indirectEpTargetAddress >>> 0;
+
+                    if (PE.VAToOffset(indirectEpTargetAddress) !== -1) {
+                        indirectEpKnownAddresses[indirectEpTargetRegister] = indirectEpTargetAddress;
+                    } else {
+                        delete indirectEpKnownAddresses[indirectEpTargetRegister];
+                    }
+                } else {
+                    delete indirectEpKnownAddresses[indirectEpTargetRegister];
+                }
+            } else if (registerCopy) {
+                // Follow one exact copy of the materialized VA. A PE32+ r32 destination
+                // truncates and zero-extends the address, so validate the transformed VA.
+                var indirectEpTargetRegister = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    indirectEpSourceRegister = registerCopy[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    indirectEpTargetAddress = indirectEpKnownAddresses[indirectEpSourceRegister];
+
+                if (indirectEpTargetAddress !== undefined) {
+                    if (epRegister32BitPattern.test(registerCopy[1])) indirectEpTargetAddress = indirectEpTargetAddress >>> 0;
+
+                    if (PE.VAToOffset(indirectEpTargetAddress) !== -1) {
+                        indirectEpKnownAddresses[indirectEpTargetRegister] = indirectEpTargetAddress;
+                    } else {
+                        delete indirectEpKnownAddresses[indirectEpTargetRegister];
+                    }
+                } else {
+                    delete indirectEpKnownAddresses[indirectEpTargetRegister];
+                }
+            } else if (indirectTransfer) {
+                var indirectTransferRegister = indirectTransfer[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
+                var indirectEpTargetAddress = indirectEpKnownAddresses[indirectTransferRegister];
+
+                if (indirectEpTargetAddress !== undefined && PE.VAToOffset(indirectEpTargetAddress) !== -1) {
+                    log(logType.any, "Indirect " + indirectTransfer[1].toUpperCase() + " transfer near EP to 0x" + indirectEpTargetAddress.toString(16));
+
+                    isIndirectEpTransferPresent = true;
+                }
+
+                break;
+            } else if (isNeutralInstruction || conditionalBranch || /^(?:CMP|TEST)$/.test(currentEpOpCode)) {
+                // These instructions preserve every general-purpose register on the
+                // physical fall-through path, so all proven image addresses remain valid.
+            } else if (simplePolymorphicInstruction) {
+                // Only PE32+ r32 self-operations reach this branch. They zero-extend one
+                // physical register but cannot invalidate addresses proven in other registers.
+                delete indirectEpKnownAddresses[simplePolymorphicRegister.toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+            } else if (valuePreservingInstruction) {
+                var valuePreservingRegister = (valuePreservingInstruction[1] || valuePreservingInstruction[2]).toUpperCase(),
+                    valuePreservingRegisterKey = valuePreservingRegister.replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
+                    valuePreservingAddress = indirectEpKnownAddresses[valuePreservingRegisterKey];
+
+                if (valuePreservingAddress !== undefined && PE_Cached.is64bit && epRegister32BitPattern.test(valuePreservingRegister)) {
+                    valuePreservingAddress = valuePreservingAddress >>> 0;
+
+                    if (PE.VAToOffset(valuePreservingAddress) !== -1) {
+                        indirectEpKnownAddresses[valuePreservingRegisterKey] = valuePreservingAddress;
+                    } else {
+                        delete indirectEpKnownAddresses[valuePreservingRegisterKey];
+                    }
+                }
+            } else if (registerWrite) {
+                delete indirectEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
+            } else {
+                indirectEpKnownAddresses = {};
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
+            }
+        }
+    }
+
+    if (isIndirectEpTransferPresent) options = addOption(options, "Indirect EP transfer");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
