@@ -4880,6 +4880,65 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for NOP instructions mixed with real instructions near the entry point
+
+    var isNopPaddingPresent = false;
+
+    if (!isStartsWithNop && (PE_Cached.isArchX86 || PE_Cached.isARM || PE_Cached.isThumb || PE_Cached.isARM64)) {
+        var internalNopCount = 0,
+            pendingNopCount = 0,
+            maxInternalNopRun = 0,
+            isRealInstructionSeen = false,
+            // Cobblestone uses architecture-specific branch mnemonics. Keeping both x86
+            // and ARM terminators here lets the counter remain architecture-neutral.
+            nopPaddingStopOpCodes = [
+                "B", "BL", "BLR", "BR", "BRK", "BX", "CALL", "CBNZ", "CBZ", "ERET",
+                "HLT", "HVC", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
+                "JMP", "JMPF", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ", "RET",
+                "RETF", "RETN", "SMC", "SVC", "SYSENTER", "SYSRET", "SYSEXIT", "TBNZ",
+                "TBZ", "UD2"
+            ];
+
+        // Inspect at most the first 64 instructions and do not cross a basic-block boundary.
+        // A pending run is counted only after another real instruction confirms it is internal.
+        for (var i = 0; i < 64 && !isNopPaddingPresent; i++) {
+            var currentInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentOpCode = getAsmOpCode(currentInstruction);
+
+            if (!currentOpCode) break;
+
+            if (currentOpCode === "NOP" || currentOpCode === "FNOP") {
+                if (isRealInstructionSeen) pendingNopCount++;
+            } else {
+                if (pendingNopCount) {
+                    internalNopCount += pendingNopCount;
+                    if (pendingNopCount > maxInternalNopRun) maxInternalNopRun = pendingNopCount;
+                    pendingNopCount = 0;
+
+                    // Two adjacent internal NOPs or three interspersed NOPs are unlikely compiler output.
+                    if (maxInternalNopRun >= 2 || internalNopCount >= 3) {
+                        log(logType.any, "Internal NOP padding near EP: " + internalNopCount + " instruction(s)");
+
+                        isNopPaddingPresent = true;
+                    }
+                }
+
+                isRealInstructionSeen = true;
+
+                if (nopPaddingStopOpCodes.indexOf(currentOpCode) !== -1 ||
+                    /^J[A-Z]+$/.test(currentOpCode) ||
+                    /^B(?:\.)?(?:EQ|NE|CS|HS|CC|LO|MI|PL|VS|VC|HI|LS|GE|LT|GT|LE)$/.test(currentOpCode)) {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (isNopPaddingPresent) options = addOption(options, "Nop EP padding");
+
+
+
+
     // Check for "Stack-push address near EP" (CALL $+5)
 
     var isAddrToStackTrickPresent = false;
@@ -4920,15 +4979,22 @@ function scanForObfuscations_Native() {
 
 
 
+    // The following patterns model x86 register semantics and are consumed only by rules
+    // guarded with isArchX86. EAX/R8D aliases are later canonicalized to RAX/R8 so that
+    // writes through different widths invalidate the same physical register provenance.
     const epGeneralPurposeRegister = "(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:AX|BX|CX|DX|SI|DI|BP|8D?|9D?|1[0-5]D?))",
         epFlagsGeneralPurposeRegister = "(?:" + epGeneralPurposeRegister + "|(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])W)",
-        epRedundantSelfMoveRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|BP)" :
+        // MOV EDI, EDI is excluded only in I386 because it is the conventional hotpatch
+        // prologue. In PE32+, every 32-bit self-move may intentionally zero the upper half.
+        epRedundantSelfMoveRegister = PE_Cached.isI386 ? "(?:E(?:AX|BX|CX|DX|SI|BP)|(?:AX|BX|CX|DX|SI|DI|BP))" :
             "(?:(?:AX|BX|CX|DX|SI|DI|BP)|R(?:(?:AX|BX|CX|DX|SI|DI|BP)|(?:8|9|1[0-5])W?))",
         epRegister32BitPrefixPattern = /^E/,
         epRegister32BitSuffixPattern = /D$/,
         epRegister32BitPattern = /^(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])D)$/i,
         epRegisterCopyPattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (" + epGeneralPurposeRegister + ")$", "i"),
         epRedundantSelfMovePattern = new RegExp("^MOV (" + epRedundantSelfMoveRegister + "), \\1$", "i"),
+        // Capture 1 belongs to MOV/XCHG and capture 2 to LEA. Consumers deliberately use
+        // match[1] || match[2] to obtain the affected register from either alternative.
         epSimplePolymorphicInstructionPattern = new RegExp("^(?:MOV|XCHG) (" + epFlagsGeneralPurposeRegister + "), \\1$|^LEA (" + epGeneralPurposeRegister + "), \\[\\2\\]$", "i"),
         epConditionalBranchPattern = /^(J[A-Z]+) (0X[0-9A-F]+|\d+)$/i,
         epDirectJumpPattern = /^JMP (0X[0-9A-F]+|\d+)$/i,
@@ -4958,7 +5024,9 @@ function scanForObfuscations_Native() {
             "JNE", "JNZ", "JO", "JNP", "JPO", "JS"
         ],
         epScanStopOpCodes = [
-            "CALL", "JMP", "RET", "RETN", "INT", "UD2", "HLT"
+            "CALL", "HLT", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
+            "JMP", "JMPF", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ", "RET",
+            "RETF", "RETN", "SYSENTER", "SYSRET", "SYSEXIT", "UD2"
         ];
 
 
@@ -4976,9 +5044,18 @@ function scanForObfuscations_Native() {
         var syntheticEpTargetAddress = String(),
             syntheticEpTargetType = String(),
             syntheticEpNeutralInstructionCount = 0,
+            // RET consumes one native pointer. A partial DWORD store in PE32+ cannot prove
+            // the resulting 64-bit return address and must therefore never become a target.
+            syntheticEpStackValueSize = PE_Cached.isI386 ? "DWORD" : "QWORD",
+            syntheticEpStackPointer = PE_Cached.isI386 ? "ESP" : "RSP",
+            syntheticEpStackTransferRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
+                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             // This is a plain object: its dynamically added properties are configurable,
             // so delete object[key] is valid in strict mode.
             syntheticEpKnownAddresses = {};
+
+        // Two related states are tracked independently: known register VAs and the value
+        // currently proven to occupy the top stack slot. RET matches only the latter.
 
         // Inspect the whole usual entry stub while using cached linear disassembly.
         for (var i = 0; i < 128 && !isSyntheticEpTransferPresent; i++) {
@@ -4991,11 +5068,11 @@ function scanForObfuscations_Native() {
             var registerLiteralAddress = currentEpInstruction.match(new RegExp("^MOV (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i")),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
                 pushedRegister = currentEpInstruction.match(new RegExp("^PUSH (" + epGeneralPurposeRegister + ")$", "i")),
-                storedRegister = currentEpInstruction.match(new RegExp("^MOV (?:DWORD|QWORD) PTR \\[(?:E|R)SP\\], (" + epGeneralPurposeRegister + ")$", "i")),
+                storedRegister = currentEpInstruction.match(new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i")),
                 poppedRegister = currentEpInstruction.match(new RegExp("^POP (" + epGeneralPurposeRegister + ")$", "i")),
-                exchangedRegister = currentEpInstruction.match(new RegExp("^XCHG (?:DWORD|QWORD) PTR \\[(?:E|R)SP\\], (" + epGeneralPurposeRegister + ")$", "i")),
+                exchangedRegister = currentEpInstruction.match(new RegExp("^XCHG " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i")),
                 pushedAddress = currentEpInstruction.match(/^PUSH (0X[0-9A-F]+|\d+)$/i),
-                storedAddress = currentEpInstruction.match(/^MOV (?:DWORD|QWORD) PTR \[(?:E|R)SP\], (0X[0-9A-F]+|\d+)$/i),
+                storedAddress = currentEpInstruction.match(new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (0X[0-9A-F]+|\\d+)$", "i")),
                 stackPivotAddress = PE_Cached.isI386 ? currentEpInstruction.match(/^MOV ESP, (0X[0-9A-F]+|\d+)$/i) : null,
                 targetAddress = pushedAddress || storedAddress,
                 registerWrite = currentEpInstruction.match(new RegExp("^(?:MOV|LEA|XOR|ADD|SUB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
@@ -5018,6 +5095,7 @@ function scanForObfuscations_Native() {
                     syntheticEpNeutralInstructionCount = 0;
                 }
             } else if (targetAddress && PE.VAToOffset(parseInt(targetAddress[1], 0)) !== -1) {
+                // A direct PUSH or a native-width [SP] write proves the next RET target.
                 syntheticEpTargetAddress = targetAddress[1];
                 syntheticEpTargetType = pushedAddress ? "push" : "stack write";
                 syntheticEpNeutralInstructionCount = 0;
@@ -5043,6 +5121,8 @@ function scanForObfuscations_Native() {
                 syntheticEpNeutralInstructionCount = 0;
             } else if (poppedRegister && syntheticEpTargetAddress) {
                 // PUSH <VA>; POP reg is a common polymorphic spelling of MOV reg, <VA>.
+                // Moving the proof into a register also clears the top-of-stack proof,
+                // because POP has consumed that slot.
                 syntheticEpKnownAddresses[poppedRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = syntheticEpTargetAddress;
                 syntheticEpTargetAddress = String();
                 syntheticEpTargetType = String();
@@ -5072,7 +5152,7 @@ function scanForObfuscations_Native() {
                 // An unrelated register write cannot invalidate other proven addresses.
                 // Remove only the overwritten register instead of discarding all provenance.
                 delete syntheticEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
-            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1) {
+            } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]+$/.test(currentEpOpCode)) {
                 // Do not linearly join instructions from a subsequent basic block.
                 break;
             } else {
@@ -5103,6 +5183,10 @@ function scanForObfuscations_Native() {
             // Plain-object entries are configurable, therefore strict-mode delete is safe.
             opaqueEpKnownZeroRegisters = {};
 
+        // The state machine keeps two facts: registers proven to contain zero, and the
+        // most recent instruction that established deterministic EFLAGS. A MOV may extend
+        // the first fact without replacing the second because MOV itself preserves flags.
+
         for (var i = 0; i < 256 && !isOpaqueEpBranchPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
@@ -5126,6 +5210,8 @@ function scanForObfuscations_Native() {
                 opaqueEpOriginInstruction = currentEpInstruction;
                 opaqueEpNeutralInstructionCount = 0;
                 if (currentEpOpCode !== "CMP") {
+                    // XOR/SUB reg,reg and AND reg,0 also prove the destination value is zero;
+                    // CMP reg,reg proves only flags because it does not write the register.
                     opaqueEpKnownZeroRegisters[opaqueEpRegister] = true;
                 }
             } else if (zeroLiteralRegister) {
@@ -5164,6 +5250,10 @@ function scanForObfuscations_Native() {
                 log(logType.any, "Opaque " + opaqueEpBranchType + " branch near EP: " + opaqueEpOriginInstruction + "; " + currentEpInstruction);
 
                 isOpaqueEpBranchPresent = true;
+            } else if (conditionalBranch) {
+                // Any other Jcc ends this linear path. Continuing after it could combine
+                // EFLAGS provenance with bytes that are not executed on the same path.
+                break;
             } else if (flagsNeutralRegisterWrite) {
                 // A flags-neutral write invalidates only its destination, not candidate EFLAGS.
                 // This retains a constant branch even when polymorphic junk changes another register.
@@ -5252,6 +5342,11 @@ function scanForObfuscations_Native() {
                 isSimplePolymorphicInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
                     epSimplePolymorphicInstructionPattern.test(currentEpInstruction);
 
+            // One pending Jcc is retained to recognize three equivalent shapes: a branch
+            // to its own fall-through, complementary Jcc instructions with one target,
+            // or a later direct JMP to the pending target. Only bounded neutral junk may
+            // occur between the two encodings, so unrelated control flow is not joined.
+
             if (conditionalBranch && currentEpOpCode !== "JMP") {
                 var currentBranchTarget = parseInt(conditionalBranch[2], 0),
                     currentCanonicalBranchOpCode = epCanonicalBranchOpCodes[currentEpOpCode] || currentEpOpCode,
@@ -5281,6 +5376,8 @@ function scanForObfuscations_Native() {
                 break;
             } else if (isSimplePolymorphicInstruction && degenerateEpBranchOpCode &&
                 degenerateEpNeutralInstructionCount < epNeutralInstructionLimit) {
+                // Preserve the pending branch only across instructions that cannot change
+                // its target or introduce a meaningful side effect for this structural check.
                 degenerateEpNeutralInstructionCount++;
             } else {
                 degenerateEpBranchOpCode = String();
@@ -5319,6 +5416,8 @@ function scanForObfuscations_Native() {
                     epSimplePolymorphicInstructionPattern.test(currentEpInstruction);
 
             if (pushedRegister) {
+                // Keep the exact operand spelling: PUSH AX/POP AX is balanced, while mixing
+                // register widths changes both the stack delta and the restored value.
                 redundantEpPushedRegister = pushedRegister[1].toUpperCase();
                 redundantEpStackNeutralInstructionCount = 0;
             } else if (poppedRegister && redundantEpPushedRegister === poppedRegister[1].toUpperCase()) {
@@ -5329,6 +5428,8 @@ function scanForObfuscations_Native() {
                 redundantEpStackNeutralInstructionCount < epNeutralInstructionLimit) {
                 redundantEpStackNeutralInstructionCount++;
             } else {
+                // Any non-neutral instruction makes the PUSH potentially meaningful, so a
+                // later POP must start from a new candidate instead of reusing stale state.
                 redundantEpPushedRegister = String();
                 redundantEpStackNeutralInstructionCount = 0;
 
@@ -5364,6 +5465,10 @@ function scanForObfuscations_Native() {
                 isSafeReversiblePadding = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
                     (simplePolymorphicInstruction && reversibleEpRegister ===
                         (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase());
+
+            // A candidate is valid only when the second operation has the same width,
+            // register and literal. Numeric literals are parsed so equivalent hexadecimal
+            // and decimal spellings still pair, while the exact register spelling preserves width.
 
             if (reversibleBinaryInstruction) {
                 var currentReversibleOpCode = reversibleBinaryInstruction[1].toUpperCase(),
@@ -5401,6 +5506,8 @@ function scanForObfuscations_Native() {
                 }
             } else if (isSafeReversiblePadding && reversibleEpOpCode &&
                 reversibleEpNeutralInstructionCount < epNeutralInstructionLimit) {
+                // Self-moves on the tracked register and architectural NOP/PAUSE instructions
+                // preserve its value; the small limit prevents pairing unrelated arithmetic.
                 reversibleEpNeutralInstructionCount++;
             } else {
                 reversibleEpOpCode = String();
@@ -5427,6 +5534,10 @@ function scanForObfuscations_Native() {
             constantEpComparisonOrigin = String(),
             constantEpNeutralInstructionCount = 0;
 
+        // Values use canonical physical-register keys, but truncation is applied whenever
+        // a 32-bit destination is written. This mirrors x86-64 zero-extension and also lets
+        // PE32 reuse the same propagation logic without treating AX as a full-register write.
+
         for (var i = 0; i < 128 && !isConstantOpaqueEpComparisonPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
@@ -5450,6 +5561,8 @@ function scanForObfuscations_Native() {
 
                 if (knownComparedLiteral !== undefined && epRegister32BitPattern.test(literalCompare[1])) knownComparedLiteral = knownComparedLiteral >>> 0;
 
+                // Restrict the proof to unambiguous non-negative signed 32-bit literals.
+                // This avoids JavaScript precision and x86-64 sign-extension ambiguities.
                 if (comparedLiteral <= 0x7FFFFFFF && knownComparedLiteral === comparedLiteral) {
                     constantEpComparisonOrigin = currentEpInstruction;
                     constantEpNeutralInstructionCount = 0;
@@ -5468,6 +5581,9 @@ function scanForObfuscations_Native() {
 
                 break;
             } else if (literalMove || registerCopy || flagsNeutralRegisterWrite || isSimplePolymorphicInstruction) {
+                // Propagate only operations whose destination value is statically known.
+                // Other flags-neutral writes invalidate their destination without discarding
+                // unrelated register facts accumulated earlier in the linear block.
                 if (literalMove) {
                     var literalMoveRegister = literalMove[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
                         literalMoveValue = parseInt(literalMove[2], 0);
@@ -5603,20 +5719,6 @@ function scanForObfuscations_Native() {
     }
 
     if (proxyJumpsAtEpPresent) options = addOption(options, "Proxy jmp at EP");
-
-
-
-
-    // Check if NOP padding is present at the entry point
-
-    var isNopPaddingPresent = false;
-
-    // Condition to check for NOP padding
-    if (!isStartsWithNop && emulateAndGetEpAsmPattern(true, 5).indexOf(getInstructionsAsmPattern(["NOP", "NOP"])) !== -1) {
-        isNopPaddingPresent = true;
-    }
-
-    if (isNopPaddingPresent) options = addOption(options, "Nop EP padding");
 
 
 
