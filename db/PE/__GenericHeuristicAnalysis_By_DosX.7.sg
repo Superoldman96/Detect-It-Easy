@@ -1625,6 +1625,130 @@ function scanForAntiAnalysis_NET() {
 // #region "anti-analysis (Native)"
 function scanForAntiAnalysis_Native() {
     log(logType.nothing, "Scanning for anti-analysis tricks...");
+
+    var options = String();
+
+    var isDetected = Boolean();
+
+
+
+
+    // Direct PEB debug-field reads and debug-register accesses are two compact forms
+    // of native anti-debugging. They share one verdict while retaining the source type.
+
+    var isNativeAntiDebugPresent = false,
+        nativeAntiDebugType = String();
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const antiDebugNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
+                "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            antiDebugGeneralPurposeRegister = "(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:AX|BX|CX|DX|SI|DI|BP|8D?|9D?|1[0-5]D?))",
+            antiDebugRegister32BitPrefixPattern = /^E/,
+            antiDebugRegister32BitSuffixPattern = /D$/,
+            antiDebugRegister32BitPattern = /^(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])D)$/i,
+            antiDebugPebSegment = PE_Cached.isI386 ? "FS" : "GS",
+            antiDebugPebAddress = PE_Cached.isI386 ? "(?:0X0*30|48)" : "(?:0X0*60|96)",
+            antiDebugPebFieldOffset = PE_Cached.isI386 ? "(?:0X0*(?:2|68)|2|104)" : "(?:0X0*(?:2|BC)|2|188)",
+            antiDebugPebLoadPattern = new RegExp("^MOV (" + antiDebugNativeRegister + "), (?:(?:DWORD|QWORD) PTR )?" + antiDebugPebSegment + ":\\[" + antiDebugPebAddress + "\\]$", "i"),
+            antiDebugPebFieldAccessPattern = new RegExp("\\[(" + antiDebugNativeRegister + ") ?\\+ ?" + antiDebugPebFieldOffset + "\\]", "i"),
+            antiDebugRegisterCopyPattern = new RegExp("^MOV (" + antiDebugNativeRegister + "), (" + antiDebugNativeRegister + ")$", "i"),
+            antiDebugRegisterWritePattern = new RegExp("^(?:MOV(?:ABS)?|MOVZX|MOVSX|MOVSXD|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + antiDebugGeneralPurposeRegister + ")(?:,|$)", "i"),
+            antiDebugRegisterAccessPattern = /\bDR[0-7]\b/i,
+            antiDebugSelfMovePattern = new RegExp("^(?:MOV|XCHG) (" + antiDebugGeneralPurposeRegister + "), \\1$|^LEA (" + antiDebugGeneralPurposeRegister + "), \\[\\2\\]$", "i"),
+            antiDebugValuePreservingInstructionPattern = new RegExp("^(?:ADD|SUB|OR|XOR|SHL|SHR|SAR|ROL|ROR) (" + antiDebugGeneralPurposeRegister + "), (?:0X0+|0+)$|^IMUL (" + antiDebugGeneralPurposeRegister + "), \\2, (?:0X0*1|1)$", "i"),
+            antiDebugStopOpCodes = [
+                "CALL", "HLT", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
+                "JMP", "JMPF", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ", "RET",
+                "RETF", "RETN", "SYSCALL", "SYSENTER", "SYSRET", "SYSEXIT", "UD2"
+            ];
+
+        // A PEB pointer may be copied through several registers. Track all proven aliases
+        // and invalidate only registers that are explicitly overwritten by polymorphic junk.
+        var antiDebugPebRegisters = {};
+
+        for (var i = 0; i < 256 && !isNativeAntiDebugPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var pebLoad = currentEpInstruction.match(antiDebugPebLoadPattern),
+                pebDebugFieldAccess = currentEpInstruction.match(antiDebugPebFieldAccessPattern),
+                registerCopy = currentEpInstruction.match(antiDebugRegisterCopyPattern),
+                registerWrite = currentEpInstruction.match(antiDebugRegisterWritePattern),
+                selfMove = currentEpInstruction.match(antiDebugSelfMovePattern),
+                valuePreservingInstruction = currentEpInstruction.match(antiDebugValuePreservingInstructionPattern),
+                isPebDebugFieldAccess = pebDebugFieldAccess &&
+                    antiDebugPebRegisters[pebDebugFieldAccess[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String())] &&
+                    /^(?:MOV|MOVZX|MOVSX|CMP|TEST|AND)$/.test(currentEpOpCode);
+
+            if (currentEpOpCode === "MOV" && antiDebugRegisterAccessPattern.test(currentEpInstruction)) {
+                log(logType.any, "Debug-register access near EP: " + currentEpInstruction);
+
+                nativeAntiDebugType = "REG";
+                isNativeAntiDebugPresent = true;
+            } else if (isPebDebugFieldAccess) {
+                log(logType.any, "PEB debug-field access near EP: " + currentEpInstruction);
+
+                nativeAntiDebugType = "PEB";
+                isNativeAntiDebugPresent = true;
+            } else if (pebLoad) {
+                antiDebugPebRegisters[pebLoad[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String())] = true;
+            } else if (registerCopy) {
+                var registerCopyDestination = registerCopy[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String()),
+                    registerCopySource = registerCopy[2].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
+
+                if (antiDebugPebRegisters[registerCopySource]) {
+                    antiDebugPebRegisters[registerCopyDestination] = true;
+                } else {
+                    delete antiDebugPebRegisters[registerCopyDestination];
+                }
+            } else if (selfMove) {
+                var selfMoveRegister = (selfMove[1] || selfMove[2]).toUpperCase(),
+                    selfMoveRegisterKey = selfMoveRegister.replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
+
+                // A PE32+ r32 self-move zero-extends its destination. It cannot retain
+                // a 64-bit PEB pointer, but aliases held in other registers remain valid.
+                if (PE_Cached.is64bit && antiDebugRegister32BitPattern.test(selfMoveRegister)) {
+                    delete antiDebugPebRegisters[selfMoveRegisterKey];
+                }
+            } else if (valuePreservingInstruction) {
+                var valuePreservingRegister = (valuePreservingInstruction[1] || valuePreservingInstruction[2]).toUpperCase(),
+                    valuePreservingRegisterKey = valuePreservingRegister.replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
+
+                if (PE_Cached.is64bit && antiDebugRegister32BitPattern.test(valuePreservingRegister)) {
+                    delete antiDebugPebRegisters[valuePreservingRegisterKey];
+                }
+            } else if (currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
+                currentEpOpCode === "PAUSE" || /^(?:CMP|TEST)$/.test(currentEpOpCode) ||
+                /^J(?!MP)[A-Z]+$/.test(currentEpOpCode)) {
+                // General-purpose registers survive these operations on the fall-through path.
+            } else if (registerWrite) {
+                var registerWriteKey = registerWrite[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
+
+                delete antiDebugPebRegisters[registerWriteKey];
+            } else {
+                antiDebugPebRegisters = {};
+
+                // CALL retains a physical fall-through path but may clobber registers, so
+                // its proofs are discarded while the bounded scan may start a new match later.
+                if (antiDebugStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
+            }
+        }
+    }
+
+    if (isNativeAntiDebugPresent) options = addOption(options, "Anti-debug near EP (" + nativeAntiDebugType + ")");
+
+
+
+
+    if (options.length !== 0) isDetected = true;
+
+
+    if (isDetected) {
+        _setResult("~protection", "Anti analysis", String(), PE.isVerbose() ? options : String());
+    }
 }
 // #endregion
 
