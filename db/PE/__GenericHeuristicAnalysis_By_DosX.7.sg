@@ -5342,6 +5342,82 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for nearby inverse operations which restore the original register value.
+
+    var isReversibleEpJunkPairPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && PE_Cached.isArchX86) {
+        var reversibleEpOpCode = String(),
+            reversibleEpRegister = String(),
+            reversibleEpLiteral = -1,
+            reversibleEpNeutralInstructionCount = 0;
+
+        for (var i = 0; i < 64 && !isReversibleEpJunkPairPresent; i++) {
+            var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
+                currentEpOpCode = getAsmOpCode(currentEpInstruction);
+
+            if (!currentEpOpCode) break; // Safety check
+
+            var reversibleBinaryInstruction = currentEpInstruction.match(epReversibleBinaryPattern),
+                reversibleUnaryInstruction = currentEpInstruction.match(epReversibleUnaryPattern),
+                simplePolymorphicInstruction = currentEpInstruction.match(epSimplePolymorphicInstructionPattern),
+                isSafeReversiblePadding = currentEpOpCode === "NOP" || currentEpOpCode === "PAUSE" ||
+                    (simplePolymorphicInstruction && reversibleEpRegister ===
+                        (simplePolymorphicInstruction[1] || simplePolymorphicInstruction[2]).toUpperCase());
+
+            if (reversibleBinaryInstruction) {
+                var currentReversibleOpCode = reversibleBinaryInstruction[1].toUpperCase(),
+                    currentReversibleRegister = reversibleBinaryInstruction[2].toUpperCase(),
+                    currentReversibleLiteral = parseInt(reversibleBinaryInstruction[3], 0),
+                    isInverseBinaryPair = reversibleEpRegister === currentReversibleRegister &&
+                        reversibleEpLiteral === currentReversibleLiteral &&
+                        ((reversibleEpOpCode === "XOR" && currentReversibleOpCode === "XOR") ||
+                            (reversibleEpOpCode === "ADD" && currentReversibleOpCode === "SUB") ||
+                            (reversibleEpOpCode === "SUB" && currentReversibleOpCode === "ADD"));
+
+                if (isInverseBinaryPair) {
+                    log(logType.any, "Reversible junk pair near EP: " + reversibleEpOpCode + "/" + currentReversibleOpCode + " " + currentReversibleRegister);
+
+                    isReversibleEpJunkPairPresent = true;
+                } else {
+                    reversibleEpOpCode = currentReversibleOpCode;
+                    reversibleEpRegister = currentReversibleRegister;
+                    reversibleEpLiteral = currentReversibleLiteral;
+                    reversibleEpNeutralInstructionCount = 0;
+                }
+            } else if (reversibleUnaryInstruction) {
+                var currentReversibleOpCode = reversibleUnaryInstruction[1].toUpperCase(),
+                    currentReversibleRegister = reversibleUnaryInstruction[2].toUpperCase();
+
+                if (reversibleEpOpCode === currentReversibleOpCode && reversibleEpRegister === currentReversibleRegister) {
+                    log(logType.any, "Reversible junk pair near EP: " + currentReversibleOpCode + " " + currentReversibleRegister);
+
+                    isReversibleEpJunkPairPresent = true;
+                } else {
+                    reversibleEpOpCode = currentReversibleOpCode;
+                    reversibleEpRegister = currentReversibleRegister;
+                    reversibleEpLiteral = -1;
+                    reversibleEpNeutralInstructionCount = 0;
+                }
+            } else if (isSafeReversiblePadding && reversibleEpOpCode &&
+                reversibleEpNeutralInstructionCount < epNeutralInstructionLimit) {
+                reversibleEpNeutralInstructionCount++;
+            } else {
+                reversibleEpOpCode = String();
+                reversibleEpRegister = String();
+                reversibleEpLiteral = -1;
+                reversibleEpNeutralInstructionCount = 0;
+
+                if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]+$/.test(currentEpOpCode)) break;
+            }
+        }
+    }
+
+    if (isReversibleEpJunkPairPresent) options = addOption(options, "Reversible junk pair near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
