@@ -9,7 +9,6 @@ _debug_data.5.sg#debug-data
 _linkers.6.sg#build
 archive_7z.6.sg#compression
 arj.6.sg#compression
-compiler_BatchToApp.6.sg#build
 compiler_BeRo_Tiny_Pascal.6.sg#build
 compiler_Borland_C++.6.sg#build
 compiler_Cygwin32.4.sg#build
@@ -31,7 +30,6 @@ compiler_Intel_C.6.sg#build
 compiler_Kotlin.4.sg#build
 compiler_LCC-Win32.4.sg#build
 compiler_LDC.6.sg#build
-compiler_LLVM.6.sg#build
 compiler_Lahey_Fortran_90.4.sg#build
 compiler_Microsoft_JScript.6.sg#build
 compiler_Microsoft_SmallBasic.6.sg#build
@@ -410,6 +408,7 @@ library_TNTSI.4.sg#build
 library_Tabula.4.sg#build
 library_Telegram.Bot.4.sg#build
 library_TimeZoneConverter.4.sg#build
+library_TinyXml.4.sg#build
 library_Twilio.4.sg#build
 library_Twilio_SendGrid.4.sg#build
 library_UAParser.4.sg#build
@@ -606,6 +605,7 @@ protector_Armadillo.2.sg#protection
 protector_Arxan.2.sg#protection
 protector_BJFnt.2.sg#protection
 protector_Babel_.NET.2.sg#protection
+protector_BatchToApp.2.sg#protection
 protector_Berio.2.sg#protection
 protector_ByfronTech.2.sg#protection
 protector_ByteGuard.2.sg#protection
