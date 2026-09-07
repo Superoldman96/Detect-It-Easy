@@ -2939,10 +2939,10 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
         ["Parite (infected)", null, /\.[a-z]{3}[\u0006\u0007\u0009]$/],
         ["Win9X.Dupator (infected)", null, "DUPATOR!"],
         ["Mars Stealer (payload)", null, "LLCPPC"],
-        ["DBPE", null, "        "],
         ["Themida", "2.XX", "   "],                                                                        // https://www.oreans.com/Themida.php
         ["Themida", "3.XX", [".loadcon", ".themida", ".winlice"]],                                         // .
         ["Themida", null, [".stub01", "WinLicen", ".v-lizer", "Themida "]],                                // .
+        ["DBPE", null, "        "],
         ["PEBundle", null, /^(?:PEB|peb)undle$/],                                                          // https://bitsum.com/pebundle.htm
         ["DZA Patcher", null, "yoda"],
         ["UPX", null, /^UPX[0-3]$/],                                                                       // https://github.com/upx/upx
@@ -5017,8 +5017,8 @@ function scanForObfuscations_Native() {
             pendingNopCount = 0,
             maxInternalNopRun = 0,
             isRealInstructionSeen = false,
-            // Cobblestone uses architecture-specific branch mnemonics. Keeping both x86
-            // and ARM terminators here lets the counter remain architecture-neutral.
+            // Keeping both x86 and ARM branch mnemonics here lets the counter remain
+            // architecture-neutral while respecting every terminal control transfer.
             nopPaddingStopOpCodes = [
                 "B", "BL", "BLR", "BR", "BRK", "BX", "CALL", "CBNZ", "CBZ", "ERET",
                 "HLT", "HVC", "INT", "INT1", "INT3", "INTO", "IRET", "IRETD", "IRETQ",
@@ -5999,8 +5999,8 @@ function scanForObfuscations_Native() {
                 currentEpOpCode = getAsmOpCode(currentEpInstruction),
                 currentEpInstructionLength = PE.getDisasmLength(fpuEpCurrentAddress),
                 currentEpOffset = PE.VAToOffset(fpuEpCurrentAddress),
-                // Cobblestone currently exposes these x87 forms as DB bytes. Recognize only
-                // the two exact encodings of FNSTENV [ESP-0xC] and advance over them atomically.
+                // Match the two exact encodings of FNSTENV [ESP-0xC] without depending on
+                // textual x87 decoding, then advance over the complete instruction atomically.
                 storesRawFpuEnvironmentAtStack = currentEpOffset !== -1 &&
                     (PE.compare("D9 74 24 F4", currentEpOffset) ||
                         PE.compare("D9 B4 24 F4 FF FF FF", currentEpOffset)),
@@ -6412,6 +6412,128 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for dense instruction-level polymorphism in the reachable entry-point code.
+    // A single bounded CFG walk keeps instruction collection independent from individual
+    // verdicts. Direct calls and conditional branches retain both possible continuations;
+    // unconditional jumps retain only their target, and terminal instructions end the path.
+
+    var epNoncanonicalShiftCount = 0;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        const
+            epPolymorphismInstructionLimit = 256,
+            epShiftRotatePattern = /^(?:SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR) (.+), (0X[0-9A-F]+|\d+)$/i,
+            epByteRegisterPattern = /^(?:[ABCD][HL]|SPL|BPL|SIL|DIL|R(?:8|9|1[0-5])B)$/i,
+            epWordRegisterPattern = /^(?:AX|BX|CX|DX|SP|BP|SI|DI|R(?:8|9|1[0-5])W)$/i,
+            epDwordRegisterPattern = /^(?:E(?:AX|BX|CX|DX|SP|BP|SI|DI)|R(?:8|9|1[0-5])D)$/i,
+            epQwordRegisterPattern = /^(?:R(?:AX|BX|CX|DX|SP|BP|SI|DI|8|9|1[0-5]))$/i;
+
+        var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
+            epPolymorphismVisitedAddresses = {},
+            epPolymorphismVisitedInstructionCount = 0;
+
+        while (epPolymorphismPendingAddresses.length !== 0 &&
+            epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
+            var epPolymorphismCurrentAddress = epPolymorphismPendingAddresses.shift(),
+                epPolymorphismAddressKey = epPolymorphismCurrentAddress.toString(),
+                epPolymorphismCurrentRva = epPolymorphismCurrentAddress - PE.getImageBase(),
+                epPolymorphismSectionIndex = -1;
+
+            if (epPolymorphismVisitedAddresses[epPolymorphismAddressKey] ||
+                PE.VAToOffset(epPolymorphismCurrentAddress) === -1) continue;
+
+            // VAToOffset alone does not prove that the address contains executable physical
+            // bytes. Resolve the section explicitly to avoid decoding data or virtual padding.
+            for (var d = 0; d < PE_Cached.numberOfSections && epPolymorphismSectionIndex === -1; d++) {
+                var epPolymorphismSectionRva = PE.getSectionVirtualAddress(d),
+                    epPolymorphismSectionRawSize = PE.getSectionFileSize(d);
+
+                if (epPolymorphismCurrentRva >= epPolymorphismSectionRva &&
+                    epPolymorphismCurrentRva < epPolymorphismSectionRva + epPolymorphismSectionRawSize &&
+                    (PE.section[d].Characteristics & SECTION_FLAGS_EXECUTE)) {
+                    epPolymorphismSectionIndex = d;
+                }
+            }
+
+            if (epPolymorphismSectionIndex === -1) continue;
+
+            epPolymorphismVisitedAddresses[epPolymorphismAddressKey] = true;
+            epPolymorphismVisitedInstructionCount++;
+
+            var epPolymorphismInstruction = PE.getDisasmString(epPolymorphismCurrentAddress),
+                epPolymorphismOpCode = getAsmOpCode(epPolymorphismInstruction),
+                epPolymorphismInstructionLength = PE.getDisasmLength(epPolymorphismCurrentAddress);
+
+            if (!epPolymorphismOpCode || epPolymorphismInstructionLength <= 0) continue;
+
+            var epShiftRotate = epPolymorphismInstruction.match(epShiftRotatePattern);
+
+            if (epShiftRotate) {
+                var epShiftDestination = epShiftRotate[1],
+                    epShiftOperandWidth = 0;
+
+                if (/^BYTE PTR /i.test(epShiftDestination) || epByteRegisterPattern.test(epShiftDestination)) {
+                    epShiftOperandWidth = 8;
+                } else if (/^WORD PTR /i.test(epShiftDestination) || epWordRegisterPattern.test(epShiftDestination)) {
+                    epShiftOperandWidth = 16;
+                } else if (/^DWORD PTR /i.test(epShiftDestination) || epDwordRegisterPattern.test(epShiftDestination)) {
+                    epShiftOperandWidth = 32;
+                } else if (/^QWORD PTR /i.test(epShiftDestination) || epQwordRegisterPattern.test(epShiftDestination)) {
+                    epShiftOperandWidth = 64;
+                }
+
+                // x86 masks immediate shift/rotate counts. Encoding a count at least as wide
+                // as the operand is therefore a deliberately noncanonical spelling which
+                // ordinary compilers normalize to the equivalent smaller immediate.
+                if (epShiftOperandWidth && parseInt(epShiftRotate[2], 0) >= epShiftOperandWidth) {
+                    epNoncanonicalShiftCount++;
+                }
+            }
+
+            var epPolymorphismNextAddress = epPolymorphismCurrentAddress + epPolymorphismInstructionLength,
+                epPolymorphismDirectControlFlow = epPolymorphismInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
+
+            if (epPolymorphismDirectControlFlow) {
+                var epPolymorphismTargetAddress = parseInt(epPolymorphismDirectControlFlow[2], 0);
+
+                if (epPolymorphismOpCode === "JMP" || epPolymorphismOpCode === "JMPF") {
+                    epPolymorphismPendingAddresses.push(epPolymorphismTargetAddress);
+                } else {
+                    epPolymorphismPendingAddresses.push(epPolymorphismTargetAddress);
+                    epPolymorphismPendingAddresses.push(epPolymorphismNextAddress);
+                }
+            } else if (epPolymorphismOpCode === "CALL") {
+                // An unresolved indirect call may return, so retain only its fall-through.
+                epPolymorphismPendingAddresses.push(epPolymorphismNextAddress);
+            } else if (epScanStopOpCodes.indexOf(epPolymorphismOpCode) === -1) {
+                epPolymorphismPendingAddresses.push(epPolymorphismNextAddress);
+            }
+        }
+
+        // Clean up: release the control-flow worklist and its potentially dense visited set.
+        epPolymorphismPendingAddresses = undefined;
+        epPolymorphismVisitedAddresses = undefined;
+    }
+
+
+
+
+    // Check for repeated shifts or rotates whose immediate count is at least as wide as the operand
+
+    var isNoncanonicalEpShiftPresent = false;
+
+    if (epNoncanonicalShiftCount >= 5) {
+        log(logType.any, "Noncanonical shifts near EP: " + epNoncanonicalShiftCount);
+
+        isNoncanonicalEpShiftPresent = true;
+    }
+
+    if (isNoncanonicalEpShiftPresent) options = addOption(options, "Noncanonical shift near EP");
+
+
+
+
     // Check for strange opcodes at entry point
 
     var isStrangeOpCodeNearEpPresent = false;
@@ -6749,8 +6871,8 @@ function scanForObfuscations_Native() {
         }
     }
 
-    if (isUnderreportedStartupCodePresent) options = addOption(options, "Underreported startup code");
-    else if (isSeverelyUnderreportedCodePresent) options = addOption(options, "Underreported code");
+    if (isUnderreportedStartupCodePresent) options = addOption(options, "SizeOfCode mismatch (EP)");
+    else if (isSeverelyUnderreportedCodePresent) options = addOption(options, "SizeOfCode mismatch");
 
 
 
