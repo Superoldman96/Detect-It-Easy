@@ -6417,17 +6417,23 @@ function scanForObfuscations_Native() {
     // verdicts. Direct calls and conditional branches retain both possible continuations;
     // unconditional jumps retain only their target, and terminal instructions end the path.
 
-    var epNoncanonicalShiftCount = 0;
+    var epNoncanonicalShiftCount = 0,
+        epStackMutationCount = 0,
+        epComplexStackMutationCount = 0;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const
             epPolymorphismInstructionLimit = 256,
             epShiftRotatePattern = /^(?:SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR) (.+), (0X[0-9A-F]+|\d+)$/i,
+            epStackMutationPattern = /^(ADD|SUB|ADC|SBB|AND|OR|XOR|INC|DEC|NEG|NOT|SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR|XADD|XCHG) (?:(?:BYTE|WORD|DWORD|QWORD) PTR )?(?:[A-Z]+:)?\[[^\]]*\b(?:ESP|RSP)\b[^\]]*\](?:,|$)/i,
             epByteRegisterPattern = /^(?:[ABCD][HL]|SPL|BPL|SIL|DIL|R(?:8|9|1[0-5])B)$/i,
             epWordRegisterPattern = /^(?:AX|BX|CX|DX|SP|BP|SI|DI|R(?:8|9|1[0-5])W)$/i,
             epDwordRegisterPattern = /^(?:E(?:AX|BX|CX|DX|SP|BP|SI|DI)|R(?:8|9|1[0-5])D)$/i,
-            epQwordRegisterPattern = /^(?:R(?:AX|BX|CX|DX|SP|BP|SI|DI|8|9|1[0-5]))$/i;
+            epQwordRegisterPattern = /^(?:R(?:AX|BX|CX|DX|SP|BP|SI|DI|8|9|1[0-5]))$/i,
+            epComplexStackMutationOpCodes = [
+                "NEG", "NOT", "SAL", "SHL", "SHR", "SAR", "ROL", "ROR", "RCL", "RCR", "XADD", "XCHG"
+            ];
 
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
             epPolymorphismVisitedAddresses = {},
@@ -6491,6 +6497,16 @@ function scanForObfuscations_Native() {
                 }
             }
 
+            var epStackMutation = epPolymorphismInstruction.match(epStackMutationPattern);
+
+            if (epStackMutation) {
+                epStackMutationCount++;
+
+                if (epComplexStackMutationOpCodes.indexOf(epStackMutation[1].toUpperCase()) !== -1) {
+                    epComplexStackMutationCount++;
+                }
+            }
+
             var epPolymorphismNextAddress = epPolymorphismCurrentAddress + epPolymorphismInstructionLength,
                 epPolymorphismDirectControlFlow = epPolymorphismInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
 
@@ -6530,6 +6546,21 @@ function scanForObfuscations_Native() {
     }
 
     if (isNoncanonicalEpShiftPresent) options = addOption(options, "Noncanonical shift near EP");
+
+
+
+
+    // Check for repeated arithmetic stack writes containing at least one complex bit transformation
+
+    var isComplexEpStackMutationPresent = false;
+
+    if (epStackMutationCount >= 4 && epComplexStackMutationCount !== 0) {
+        log(logType.any, "Stack mutations near EP: " + epStackMutationCount + " (complex: " + epComplexStackMutationCount + ")");
+
+        isComplexEpStackMutationPresent = true;
+    }
+
+    if (isComplexEpStackMutationPresent) options = addOption(options, "Complex stack mutation near EP");
 
 
 
