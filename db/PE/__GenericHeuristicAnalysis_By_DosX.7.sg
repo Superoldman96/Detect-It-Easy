@@ -6691,6 +6691,21 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for a direct call whose executable target starts by recovering its return address
+
+    var isCallPopEpIpRecoveryPresent = false;
+
+    if (epCallPopIpRecoveryAddress !== -1) {
+        log(logType.any, "Call/Pop IP recovery near EP");
+
+        isCallPopEpIpRecoveryPresent = true;
+    }
+
+    if (isCallPopEpIpRecoveryPresent) options = addOption(options, "Call/Pop IP recovery near EP");
+
+
+
+
     // Check for repeated shifts or rotates whose immediate count is at least as wide as the operand
 
     var isNoncanonicalEpShiftPresent = false;
