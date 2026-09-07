@@ -6453,8 +6453,7 @@ function scanForObfuscations_Native() {
 
     if (PE_Cached.isDynamicLinkLibrary) {
         for (var i = 0; i < PE_Cached.numberOfSections && !hasWritableExecutableSection; i++) {
-            if ((PE.section[i].Characteristics & (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) ===
-                (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) {
+            if ((PE.section[i].Characteristics & (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) === (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) {
                 hasWritableExecutableSection = true;
             }
         }
@@ -7101,31 +7100,71 @@ function scanForObfuscations_Native() {
 
 
 
-    // Check for TLS (Thread Local Storage) with a bad entry point (like INT3 or RET). Trick to hide the real EP. (like BoxedApp)
+    // Check for TLS initialization paired with an unusable formal entry point.
+    // A trap or immediate return delegates startup to TLS callbacks explicitly. An EP in
+    // the virtual-only tail of an executable section is stronger evidence: no instruction
+    // exists in the file, so TLS code must reconstruct it or prevent normal EP execution.
 
-    var isTlsWithBadEpPresent = false;
+    var isTlsHiddenEpPresent = false;
 
     if (PE.isTLSPresent()) {
-        if (PE_Cached.isArchX86) {
+        const tlsEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE.getImageBase();
+
+        var isTlsEntryPointInExecutableVirtualSection = false,
+            isTlsEntryPointPhysicallyBacked = false,
+            tlsEntryPointSectionIndex = -1;
+
+        if (tlsEntryPointRva > 0) {
+            for (var i = 0; i < PE_Cached.numberOfSections; i++) {
+                const
+                    tlsEntryPointSectionRva = PE.getSectionVirtualAddress(i),
+                    tlsEntryPointSectionVirtualSize = PE.getSectionVirtualSize(i),
+                    tlsEntryPointSectionFileSize = PE.getSectionFileSize(i),
+                    tlsEntryPointSectionMappedSize = Math.max(tlsEntryPointSectionVirtualSize, tlsEntryPointSectionFileSize);
+
+                if (tlsEntryPointRva >= tlsEntryPointSectionRva &&
+                    tlsEntryPointRva < tlsEntryPointSectionRva + tlsEntryPointSectionMappedSize &&
+                    (PE.section[i].Characteristics & SECTION_FLAGS_EXECUTE)) {
+                    var tlsEntryPointOffsetInSection = tlsEntryPointRva - tlsEntryPointSectionRva;
+
+                    isTlsEntryPointInExecutableVirtualSection = true;
+                    tlsEntryPointSectionIndex = i;
+
+                    // Check both the declared raw span and the actual file mapping. This
+                    // rejects zero-filled section tails as well as truncated raw data.
+                    if (tlsEntryPointOffsetInSection < tlsEntryPointSectionFileSize &&
+                        PE.getSectionFileOffset(i) + tlsEntryPointOffsetInSection < PE.getSize() &&
+                        PE.VAToOffset(PE_Cached.addressOfUnmanagedEntryPoint) !== -1) {
+                        isTlsEntryPointPhysicallyBacked = true;
+                    }
+                }
+            }
+        }
+
+        if (isTlsEntryPointInExecutableVirtualSection && !isTlsEntryPointPhysicallyBacked) {
+            log(logType.any, "TLS virtual-only EP in section #" + tlsEntryPointSectionIndex);
+
+            isTlsHiddenEpPresent = true;
+        } else if (PE_Cached.isArchX86) {
             if (/^INT(?: )?3$/.test(PE_Cached.firstEpAsmInstruction) ||    // INT3 (0xCC) / INT 3 (0xCD 0x03)
                 /^RET(?: \d+)?$/.test(PE_Cached.firstEpAsmInstruction)) {  // All types of RET
-                isTlsWithBadEpPresent = true;
+                isTlsHiddenEpPresent = true;
             }
         } else if (PE_Cached.isARM || PE_Cached.isThumb) {
             // ARM/Thumb: Check for breakpoint or return instructions
             if (/^BKPT/.test(PE_Cached.firstEpAsmInstruction) ||         // BKPT  (breakpoint)
                 /^BX(?: )?LR$/.test(PE_Cached.firstEpAsmInstruction)) {  // BX LR (ARM32 return)
-                isTlsWithBadEpPresent = true;
+                isTlsHiddenEpPresent = true;
             }
         } else if (PE_Cached.isARM64) {
             if (/^BRK/.test(PE_Cached.firstEpAsmInstruction) ||          // BRK (breakpoint)
                 /^RET(?: )?/.test(PE_Cached.firstEpAsmInstruction)) {    // RET (return)
-                isTlsWithBadEpPresent = true;
+                isTlsHiddenEpPresent = true;
             }
         }
     }
 
-    if (isTlsWithBadEpPresent) options = addOption(options, "TLS hidden EP");
+    if (isTlsHiddenEpPresent) options = addOption(options, "TLS hidden EP");
 
 
 
