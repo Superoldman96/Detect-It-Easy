@@ -6053,6 +6053,8 @@ function scanForObfuscations_Native() {
 
     var isPrivilegedEpOpCodePresent = false;
 
+    var privilegedEpOpCodeDetected = String();
+
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const privilegedEpOpCodes = [
@@ -6075,6 +6077,7 @@ function scanForObfuscations_Native() {
             if (privilegedEpOpCodes.indexOf(currentEpOpCode) !== -1 || isControlRegisterAccess) {
                 log(logType.any, "Privileged instruction near user-mode EP: " + currentEpInstruction);
 
+                privilegedEpOpCodeDetected = currentEpOpCode;
                 isPrivilegedEpOpCodePresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
                 break;
@@ -6082,7 +6085,7 @@ function scanForObfuscations_Native() {
         }
     }
 
-    if (isPrivilegedEpOpCodePresent) options = addOption(options, "Privileged op near EP");
+    if (isPrivilegedEpOpCodePresent) options = addOption(options, "Privileged op " + privilegedEpOpCodeDetected[0] + privilegedEpOpCodeDetected.substring(1).toLowerCase() + " near EP");
 
 
 
