@@ -6424,17 +6424,25 @@ function scanForObfuscations_Native() {
         epStackMutationCount = 0,
         epComplexStackMutationCount = 0,
         epRareBitOpCount = 0,
+        epBitstreamAdcCount = 0,
+        epBitstreamMovsbCount = 0,
+        epCallPopIpRecoveryAddress = -1,
         epFlagsTransferPresent = false,
         epRolPresent = false,
         epRorPresent = false,
-        epAdcPresent = false;
+        epAdcPresent = false,
+        epBitstreamIndirectTransferPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const
             epPolymorphismInstructionLimit = 256,
+            epCallPopIpRecoveryLookaheadLimit = 16,
             epShiftRotatePattern = /^(?:SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR) (.+), (0X[0-9A-F]+|\d+)$/i,
             epStackMutationPattern = /^(ADD|SUB|ADC|SBB|AND|OR|XOR|INC|DEC|NEG|NOT|SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR|XADD|XCHG) (?:(?:BYTE|WORD|DWORD|QWORD) PTR )?(?:[A-Z]+:)?\[[^\]]*\b(?:ESP|RSP)\b[^\]]*\](?:,|$)/i,
+            epPopGeneralPurposeRegisterPattern = new RegExp("^POP (" + epGeneralPurposeRegister + ")$", "i"),
+            epBitstreamGeneralPurposeRegister = "(?:[ABCD][HL]|BPL|SIL|DIL|R(?:8|9|1[0-5])B|" + epFlagsGeneralPurposeRegister + ")",
+            epBitstreamAdcPattern = new RegExp("^ADC (" + epBitstreamGeneralPurposeRegister + "), \\1$", "i"),
             epByteRegisterPattern = /^(?:[ABCD][HL]|SPL|BPL|SIL|DIL|R(?:8|9|1[0-5])B)$/i,
             epWordRegisterPattern = /^(?:AX|BX|CX|DX|SP|BP|SI|DI|R(?:8|9|1[0-5])W)$/i,
             epDwordRegisterPattern = /^(?:E(?:AX|BX|CX|DX|SP|BP|SI|DI)|R(?:8|9|1[0-5])D)$/i,
@@ -6449,7 +6457,9 @@ function scanForObfuscations_Native() {
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
             epPolymorphismVisitedAddresses = {},
             epPolymorphismVisitedInstructionCount = 0,
-            epRareBitOpCodesFound = {};
+            epRareBitOpCodesFound = {},
+            epDirectCallTargets = {},
+            epPopRegisterByAddress = {};
 
         while (epPolymorphismPendingAddresses.length !== 0 &&
             epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
@@ -6484,6 +6494,19 @@ function scanForObfuscations_Native() {
                 epPolymorphismInstructionLength = PE.getDisasmLength(epPolymorphismCurrentAddress);
 
             if (!epPolymorphismOpCode || epPolymorphismInstructionLength <= 0) continue;
+
+            // Keep both sides of Call/Pop pairs because a branch may make the target appear
+            // before its call in the worklist. A match is accepted only after both addresses
+            // have independently passed the executable, physically-backed section check.
+            var epPopGeneralPurposeRegister = epPolymorphismInstruction.match(epPopGeneralPurposeRegisterPattern);
+
+            if (epPopGeneralPurposeRegister) {
+                epPopRegisterByAddress[epPolymorphismAddressKey] = epPopGeneralPurposeRegister[1].toUpperCase();
+            }
+
+            if (epBitstreamAdcPattern.test(epPolymorphismInstruction)) epBitstreamAdcCount++;
+
+            if (/^REP MOVSB(?: |$)/i.test(epPolymorphismInstruction)) epBitstreamMovsbCount++;
 
             var epShiftRotate = epPolymorphismInstruction.match(epShiftRotatePattern);
 
@@ -6536,8 +6559,19 @@ function scanForObfuscations_Native() {
             var epPolymorphismNextAddress = epPolymorphismCurrentAddress + epPolymorphismInstructionLength,
                 epPolymorphismDirectControlFlow = epPolymorphismInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
 
+            if (!epPolymorphismDirectControlFlow &&
+                (epPolymorphismOpCode === "CALL" || epPolymorphismOpCode === "JMP" || epPolymorphismOpCode === "JMPF")) {
+                epBitstreamIndirectTransferPresent = true;
+            }
+
             if (epPolymorphismDirectControlFlow) {
                 var epPolymorphismTargetAddress = parseInt(epPolymorphismDirectControlFlow[2], 0);
+
+                if (epPolymorphismOpCode === "CALL") {
+                    var epPolymorphismTargetKey = epPolymorphismTargetAddress.toString();
+
+                    epDirectCallTargets[epPolymorphismTargetKey] = true;
+                }
 
                 if (epPolymorphismOpCode === "JMP" || epPolymorphismOpCode === "JMPF") {
                     epPolymorphismPendingAddresses.push(epPolymorphismTargetAddress);
@@ -6553,10 +6587,105 @@ function scanForObfuscations_Native() {
             }
         }
 
+        // A Pop at a call target is not sufficient by itself: calling-convention adapters
+        // may discard the return address without using it. Confirm that the recovered value
+        // is read before it can be overwritten or invalidated by another control transfer.
+        for (var epDirectCallTargetKey in epDirectCallTargets) {
+            var epIpRecoveryRegister = epPopRegisterByAddress[epDirectCallTargetKey];
+
+            if (!epIpRecoveryRegister) continue;
+
+            var epIpRecoveryCurrentAddress = parseInt(epDirectCallTargetKey, 10),
+                epIpRecoveryPopLength = PE.getDisasmLength(epIpRecoveryCurrentAddress),
+                epIpRecoveryRegisterMentionPattern = new RegExp("\\b" + epIpRecoveryRegister + "\\b", "i"),
+                epIpRecoveryRegisterReadPattern = new RegExp("^(?:(?:ADD|ADC|SUB|SBB|AND|OR|XOR|IMUL|INC|DEC|NEG|NOT|SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR|XADD|XCHG|CMP|TEST|PUSH|CALL|JMP) " + epIpRecoveryRegister + "(?:,|$)|[^,]+,.*\\b" + epIpRecoveryRegister + "\\b|[^,]*\\[[^\\]]*\\b" + epIpRecoveryRegister + "\\b)", "i"),
+                epIpRecoveryRegisterClearPattern = new RegExp("^(?:(?:XOR|SUB) " + epIpRecoveryRegister + ", " + epIpRecoveryRegister + "|AND " + epIpRecoveryRegister + ", (?:0X0+|0+)|IMUL " + epIpRecoveryRegister + ", " + epIpRecoveryRegister + ", (?:0X0+|0+))$", "i"),
+                epIpRecoveryRegisterAlias;
+
+            // A partial-register write also destroys a recovered native address. Build the
+            // complete physical-register family without weakening proof to a partial read.
+            if (/^R(?:8|9|1[0-5])$/.test(epIpRecoveryRegister)) {
+                epIpRecoveryRegisterAlias = epIpRecoveryRegister + "(?:D|W|B)?";
+            } else {
+                var epIpRecoveryRegisterSuffix = epIpRecoveryRegister.substring(1),
+                    epIpRecoveryByteRegister = /^(?:AX|BX|CX|DX)$/.test(epIpRecoveryRegisterSuffix) ?
+                        epIpRecoveryRegisterSuffix[0] + "(?:L|H)" : epIpRecoveryRegisterSuffix + "L";
+
+                epIpRecoveryRegisterAlias = "(?:" + (epIpRecoveryRegister[0] === "R" ? epIpRecoveryRegister + "|" : String()) +
+                    "E" + epIpRecoveryRegisterSuffix + "|" + epIpRecoveryRegisterSuffix + "|" + epIpRecoveryByteRegister + ")";
+            }
+
+            var epIpRecoveryRegisterAliasMentionPattern = new RegExp("\\b" + epIpRecoveryRegisterAlias + "\\b", "i");
+
+            if (epIpRecoveryPopLength <= 0) continue;
+
+            epIpRecoveryCurrentAddress += epIpRecoveryPopLength;
+
+            for (var epIpRecoveryIndex = 0; epIpRecoveryIndex < epCallPopIpRecoveryLookaheadLimit; epIpRecoveryIndex++) {
+                var epIpRecoveryCurrentRva = epIpRecoveryCurrentAddress - PE.getImageBase(),
+                    epIpRecoverySectionIndex = -1;
+
+                // The proof lookahead is linear and intentionally short, but every decoded
+                // address must still refer to executable physical bytes rather than padding.
+                for (var d = 0; d < PE_Cached.numberOfSections && epIpRecoverySectionIndex === -1; d++) {
+                    var epIpRecoverySectionRva = PE.getSectionVirtualAddress(d),
+                        epIpRecoverySectionRawSize = PE.getSectionFileSize(d);
+
+                    if (epIpRecoveryCurrentRva >= epIpRecoverySectionRva &&
+                        epIpRecoveryCurrentRva < epIpRecoverySectionRva + epIpRecoverySectionRawSize &&
+                        (PE.section[d].Characteristics & SECTION_FLAGS_EXECUTE)) {
+                        epIpRecoverySectionIndex = d;
+                    }
+                }
+
+                if (epIpRecoverySectionIndex === -1 || PE.VAToOffset(epIpRecoveryCurrentAddress) === -1) break;
+
+                var epIpRecoveryInstruction = PE.getDisasmString(epIpRecoveryCurrentAddress),
+                    epIpRecoveryOpCode = getAsmOpCode(epIpRecoveryInstruction),
+                    epIpRecoveryInstructionLength = PE.getDisasmLength(epIpRecoveryCurrentAddress),
+                    epIpRecoveryRegisterMentioned = epIpRecoveryRegisterMentionPattern.test(epIpRecoveryInstruction),
+                    epIpRecoveryRegisterAliasMentioned = epIpRecoveryRegisterAliasMentionPattern.test(epIpRecoveryInstruction),
+                    epIpRecoverySimplePolymorphism = epSimplePolymorphicInstructionPattern.test(epIpRecoveryInstruction),
+                    epIpRecoveryValuePreserving = epValuePreservingInstructionPattern.test(epIpRecoveryInstruction);
+
+                if (!epIpRecoveryOpCode || epIpRecoveryInstructionLength <= 0) break;
+
+                if (epIpRecoveryRegisterAliasMentioned && !epIpRecoveryRegisterMentioned) break;
+
+                if (epIpRecoveryRegisterMentioned &&
+                    !epIpRecoverySimplePolymorphism && !epIpRecoveryValuePreserving) {
+                    if (!epIpRecoveryRegisterClearPattern.test(epIpRecoveryInstruction) &&
+                        epIpRecoveryRegisterReadPattern.test(epIpRecoveryInstruction)) {
+                        epCallPopIpRecoveryAddress = parseInt(epDirectCallTargetKey, 10);
+                    }
+
+                    // An explicit mention either consumes the proof or overwrites its register.
+                    break;
+                }
+
+                var epIpRecoveryRegisterWrite = epIpRecoveryInstruction.match(epFlagsNeutralRegisterWritePattern) ||
+                    epIpRecoveryInstruction.match(epTrackedRegisterWritePattern),
+                    epIpRecoveryNeutralInstruction = epIpRecoveryOpCode === "NOP" || epIpRecoveryOpCode === "FNOP" ||
+                        epIpRecoveryOpCode === "PAUSE" || epIpRecoveryOpCode === "CLC" ||
+                        epIpRecoveryOpCode === "STC" || epIpRecoveryOpCode === "CMC" ||
+                        epStackRoundTripPushPattern.test(epIpRecoveryInstruction) ||
+                        epIpRecoverySimplePolymorphism || epIpRecoveryValuePreserving ||
+                        epIpRecoveryRegisterWrite || /^(?:CMP|TEST)$/.test(epIpRecoveryOpCode);
+
+                if (!epIpRecoveryNeutralInstruction || epScanStopOpCodes.indexOf(epIpRecoveryOpCode) !== -1) break;
+
+                epIpRecoveryCurrentAddress += epIpRecoveryInstructionLength;
+            }
+
+            if (epCallPopIpRecoveryAddress !== -1) break;
+        }
+
         // Clean up: release the control-flow worklist and its potentially dense visited set.
         epPolymorphismPendingAddresses = undefined;
         epPolymorphismVisitedAddresses = undefined;
         epRareBitOpCodesFound = undefined;
+        epDirectCallTargets = undefined;
+        epPopRegisterByAddress = undefined;
     }
 
 
