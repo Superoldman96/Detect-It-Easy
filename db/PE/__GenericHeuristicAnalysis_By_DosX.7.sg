@@ -6706,6 +6706,23 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for carry-fed bitstream decoding combined with repeated byte-string copying.
+    // Neither operation is distinctive alone; the indirect transfer makes the dense pair
+    // specific to a dispatcher-style unpacking loop while retaining register polymorphism.
+
+    var isBitstreamEpUnpackerPresent = false;
+
+    if (epBitstreamAdcCount >= 8 && epBitstreamMovsbCount >= 2 && epBitstreamIndirectTransferPresent) {
+        log(logType.any, "Bitstream unpacker near EP: Adc: " + epBitstreamAdcCount + ", Rep Movsb: " + epBitstreamMovsbCount);
+
+        isBitstreamEpUnpackerPresent = true;
+    }
+
+    if (isBitstreamEpUnpackerPresent) options = addOption(options, "Bitstream unpacker near EP");
+
+
+
+
     // Check for repeated shifts or rotates whose immediate count is at least as wide as the operand
 
     var isNoncanonicalEpShiftPresent = false;
