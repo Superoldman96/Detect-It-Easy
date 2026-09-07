@@ -6749,11 +6749,8 @@ function scanForObfuscations_Native() {
         }
     }
 
-    if (isUnderreportedStartupCodePresent) {
-        options = addOption(options, "Underreported startup code");
-    } else if (isSeverelyUnderreportedCodePresent) {
-        options = addOption(options, "Underreported code");
-    }
+    if (isUnderreportedStartupCodePresent) options = addOption(options, "Underreported startup code");
+    else if (isSeverelyUnderreportedCodePresent) options = addOption(options, "Underreported code");
 
 
 
