@@ -6582,6 +6582,24 @@ function scanForObfuscations_Native() {
 
 
 
+    // A physically backed entry point in an executable section should be marked as code.
+
+    var isEpInNonCodeSection = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        entryPointSectionIndex !== -1 && PE.isEntryPointCorrect() &&
+        PE.getSectionFileSize(entryPointSectionIndex) !== 0 &&
+        (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_EXECUTE) &&
+        !(PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_CODE)) {
+        isEpInNonCodeSection = true;
+    }
+
+    if (isEpInNonCodeSection) options = addOption(options, "EP in non-code section");
+
+
+
+
     // A normal user-mode process cannot discard the section containing its entry point.
 
     var isDiscardableEpSectionPresent = false;
