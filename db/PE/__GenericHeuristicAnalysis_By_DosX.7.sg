@@ -6634,6 +6634,130 @@ function scanForObfuscations_Native() {
 
 
 
+    // Protectors may append physical code without updating the aggregate SizeOfCode field.
+    // Allow two pages of slack because legacy linkers do not always account for per-section
+    // file alignment consistently; substantially larger differences remain structural anomalies.
+
+    var isUnderreportedCodePresent = false,
+        isSeverelyUnderreportedCodePresent = false,
+        isUnderreportedStartupCodePresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
+        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        PE.getSizeOfCode() !== 0) {
+        var physicalCodeSize = 0,
+            physicalCodeSectionCount = 0;
+
+        for (var i = 0; i < PE_Cached.numberOfSections; i++) {
+            if ((PE.section[i].Characteristics & SECTION_FLAGS_CODE) &&
+                PE.getSectionFileSize(i) !== 0) {
+                physicalCodeSize += PE.getSectionFileSize(i);
+                physicalCodeSectionCount++;
+            }
+        }
+
+        const codeSizeAlignmentTolerance = Math.max(
+            0x2000,
+            PE.getImageOptionalHeader("FileAlignment") * physicalCodeSectionCount
+        );
+
+        if (physicalCodeSize > PE.getSizeOfCode() + codeSizeAlignmentTolerance) {
+            isUnderreportedCodePresent = true;
+            isSeverelyUnderreportedCodePresent = physicalCodeSize > PE.getSizeOfCode() * 2;
+
+            log(logType.any, "Physical code size (0x" + physicalCodeSize.toString(16) + ") exceeds SizeOfCode (0x" + PE.getSizeOfCode().toString(16) + ")");
+        }
+    }
+
+    if (isUnderreportedCodePresent && PE_Cached.numberOfSections > 1 &&
+        entryPointSectionIndex !== -1 && PE.isEntryPointCorrect()) {
+        const
+            protectedStartupSectionIndex = PE_Cached.numberOfSections - 1,
+            protectedStartupSection = PE.section[protectedStartupSectionIndex],
+            protectedStartupSectionCharacteristics = protectedStartupSection.Characteristics,
+            protectedStartupSectionRequiredFlags = SECTION_FLAGS_CODE | SECTION_FLAGS_EXECUTE | SECTION_FLAGS_READ,
+            protectedStartupSectionFileSize = PE.getSectionFileSize(protectedStartupSectionIndex),
+            protectedStartupSectionStartAddress = PE.getImageBase() + PE.getSectionVirtualAddress(protectedStartupSectionIndex),
+            protectedStartupSectionEndAddress = protectedStartupSectionStartAddress + Math.max(
+                PE.getSectionVirtualSize(protectedStartupSectionIndex),
+                protectedStartupSectionFileSize
+            );
+
+        if (protectedStartupSectionFileSize >= 0x1000 &&
+            (protectedStartupSectionCharacteristics & protectedStartupSectionRequiredFlags) === protectedStartupSectionRequiredFlags &&
+            !(protectedStartupSectionCharacteristics & SECTION_FLAGS_WRITE) &&
+            PE.calculateEntropy(PE.getSectionFileOffset(protectedStartupSectionIndex), protectedStartupSectionFileSize) > 6.6) {
+            if (entryPointSectionIndex === protectedStartupSectionIndex) {
+                isUnderreportedStartupCodePresent = true;
+            } else if (PE_Cached.isArchX86) {
+                var protectedStartupPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
+                    protectedStartupVisitedAddresses = {},
+                    protectedStartupVisitedInstructionCount = 0;
+
+                // Explore a small reachable control-flow graph instead of sweeping physical bytes.
+                // Direct calls and conditional branches keep both the target and fall-through;
+                // an unconditional jump keeps only its target. The visited set handles loops, and
+                // the global instruction limit bounds deliberately dense polymorphic dispatchers.
+                while (protectedStartupPendingAddresses.length !== 0 &&
+                    protectedStartupVisitedInstructionCount < 256 &&
+                    !isUnderreportedStartupCodePresent) {
+                    var protectedStartupCurrentAddress = protectedStartupPendingAddresses.shift(),
+                        protectedStartupAddressKey = protectedStartupCurrentAddress.toString();
+
+                    if (protectedStartupVisitedAddresses[protectedStartupAddressKey] ||
+                        PE.VAToOffset(protectedStartupCurrentAddress) === -1) continue;
+
+                    protectedStartupVisitedAddresses[protectedStartupAddressKey] = true;
+                    protectedStartupVisitedInstructionCount++;
+
+                    var protectedStartupInstruction = PE.getDisasmString(protectedStartupCurrentAddress),
+                        protectedStartupOpCode = getAsmOpCode(protectedStartupInstruction),
+                        protectedStartupInstructionLength = PE.getDisasmLength(protectedStartupCurrentAddress);
+
+                    if (!protectedStartupOpCode || protectedStartupInstructionLength <= 0) continue;
+
+                    var protectedStartupNextAddress = protectedStartupCurrentAddress + protectedStartupInstructionLength,
+                        protectedStartupDirectControlFlow = protectedStartupInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
+
+                    if (protectedStartupDirectControlFlow) {
+                        var protectedStartupTargetAddress = parseInt(protectedStartupDirectControlFlow[2], 0);
+
+                        if (protectedStartupTargetAddress >= protectedStartupSectionStartAddress &&
+                            protectedStartupTargetAddress < protectedStartupSectionEndAddress &&
+                            PE.VAToOffset(protectedStartupTargetAddress) !== -1) {
+                            isUnderreportedStartupCodePresent = true;
+
+                            log(logType.any, "EP control flow reaches underreported section #" + protectedStartupSectionIndex + " at 0x" + protectedStartupTargetAddress.toString(16));
+                        } else if (protectedStartupOpCode === "JMP" || protectedStartupOpCode === "JMPF") {
+                            protectedStartupPendingAddresses.push(protectedStartupTargetAddress);
+                        } else {
+                            protectedStartupPendingAddresses.push(protectedStartupTargetAddress);
+                            protectedStartupPendingAddresses.push(protectedStartupNextAddress);
+                        }
+                    } else if (protectedStartupOpCode === "CALL") {
+                        // An unresolved indirect call may return, so its fall-through stays reachable.
+                        protectedStartupPendingAddresses.push(protectedStartupNextAddress);
+                    } else if (epScanStopOpCodes.indexOf(protectedStartupOpCode) === -1) {
+                        protectedStartupPendingAddresses.push(protectedStartupNextAddress);
+                    }
+                }
+
+                // Clean up: release the control-flow worklist and visited-address set
+                protectedStartupPendingAddresses = undefined;
+                protectedStartupVisitedAddresses = undefined;
+            }
+        }
+    }
+
+    if (isUnderreportedStartupCodePresent) {
+        options = addOption(options, "Underreported startup code");
+    } else if (isSeverelyUnderreportedCodePresent) {
+        options = addOption(options, "Underreported code");
+    }
+
+
+
+
     // Check for a lot of sections (more than 20 -> this is a lot for native builds)
 
     var tooManySectionsPresent = false;
