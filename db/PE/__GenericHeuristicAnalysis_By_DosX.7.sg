@@ -6419,7 +6419,12 @@ function scanForObfuscations_Native() {
 
     var epNoncanonicalShiftCount = 0,
         epStackMutationCount = 0,
-        epComplexStackMutationCount = 0;
+        epComplexStackMutationCount = 0,
+        epRareBitOpCount = 0,
+        epFlagsTransferPresent = false,
+        epRolPresent = false,
+        epRorPresent = false,
+        epAdcPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
@@ -6433,11 +6438,15 @@ function scanForObfuscations_Native() {
             epQwordRegisterPattern = /^(?:R(?:AX|BX|CX|DX|SP|BP|SI|DI|8|9|1[0-5]))$/i,
             epComplexStackMutationOpCodes = [
                 "NEG", "NOT", "SAL", "SHL", "SHR", "SAR", "ROL", "ROR", "RCL", "RCR", "XADD", "XCHG"
+            ],
+            epRareBitOpCodes = [
+                "ADC", "SBB", "ROL", "ROR", "BT", "BTC", "BTR", "BTS", "BSWAP", "XADD"
             ];
 
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
             epPolymorphismVisitedAddresses = {},
-            epPolymorphismVisitedInstructionCount = 0;
+            epPolymorphismVisitedInstructionCount = 0,
+            epRareBitOpCodesFound = {};
 
         while (epPolymorphismPendingAddresses.length !== 0 &&
             epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
@@ -6507,6 +6516,20 @@ function scanForObfuscations_Native() {
                 }
             }
 
+            if (/^(?:PUSHF|PUSHFD|PUSHFQ|POPF|POPFD|POPFQ|LAHF|SAHF)$/.test(epPolymorphismOpCode)) {
+                epFlagsTransferPresent = true;
+            }
+
+            epRolPresent = epRolPresent || epPolymorphismOpCode === "ROL";
+            epRorPresent = epRorPresent || epPolymorphismOpCode === "ROR";
+            epAdcPresent = epAdcPresent || epPolymorphismOpCode === "ADC";
+
+            if (epRareBitOpCodes.indexOf(epPolymorphismOpCode) !== -1 &&
+                !epRareBitOpCodesFound[epPolymorphismOpCode]) {
+                epRareBitOpCodesFound[epPolymorphismOpCode] = true;
+                epRareBitOpCount++;
+            }
+
             var epPolymorphismNextAddress = epPolymorphismCurrentAddress + epPolymorphismInstructionLength,
                 epPolymorphismDirectControlFlow = epPolymorphismInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
 
@@ -6530,6 +6553,7 @@ function scanForObfuscations_Native() {
         // Clean up: release the control-flow worklist and its potentially dense visited set.
         epPolymorphismPendingAddresses = undefined;
         epPolymorphismVisitedAddresses = undefined;
+        epRareBitOpCodesFound = undefined;
     }
 
 
@@ -6561,6 +6585,23 @@ function scanForObfuscations_Native() {
     }
 
     if (isComplexEpStackMutationPresent) options = addOption(options, "Complex stack mutation near EP");
+
+
+
+
+    // Check for a dense mixture of flag transfers, bidirectional rotates, carry arithmetic,
+    // and at least five distinct rare bit-operation families. Prefer the concrete shift rule
+    // when both match so that one polymorphic bit mixer does not produce duplicate verdicts.
+
+    var isMixedEpBitOpsPresent = false;
+
+    if (epFlagsTransferPresent && epRolPresent && epRorPresent && epAdcPresent && epRareBitOpCount >= 5) {
+        log(logType.any, "Mixed bit-operation families near EP: " + epRareBitOpCount);
+
+        isMixedEpBitOpsPresent = true;
+    }
+
+    if (!isNoncanonicalEpShiftPresent && isMixedEpBitOpsPresent) options = addOption(options, "Mixed bit ops near EP");
 
 
 
