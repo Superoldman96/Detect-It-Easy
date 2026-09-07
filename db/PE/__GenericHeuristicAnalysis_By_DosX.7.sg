@@ -6421,6 +6421,17 @@ function scanForObfuscations_Native() {
     // verdicts. Direct calls and conditional branches retain both possible continuations;
     // unconditional jumps retain only their target, and terminal instructions end the path.
 
+    var hasWritableExecutableSection = false;
+
+    if (PE_Cached.isDynamicLinkLibrary) {
+        for (var i = 0; i < PE_Cached.numberOfSections && !hasWritableExecutableSection; i++) {
+            if ((PE.section[i].Characteristics & (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) ===
+                (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) {
+                hasWritableExecutableSection = true;
+            }
+        }
+    }
+
     var epNoncanonicalShiftCount = 0,
         epStackMutationCount = 0,
         epComplexStackMutationCount = 0,
@@ -6428,17 +6439,26 @@ function scanForObfuscations_Native() {
         epBitstreamAdcCount = 0,
         epBitstreamMovsbCount = 0,
         epCallPopIpRecoveryAddress = -1,
+        epSelfModifyingCallStubAddress = -1,
         epFlagsTransferPresent = false,
         epRolPresent = false,
         epRorPresent = false,
         epAdcPresent = false,
         epBitstreamIndirectTransferPresent = false;
 
-    if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
+    var epRepeatedSelfModifyingCallStubCountBySection = {};
+
+    if ((!PE_Cached.isDynamicLinkLibrary || hasWritableExecutableSection) &&
+        !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const
             epPolymorphismInstructionLimit = 256,
             epCallPopIpRecoveryLookaheadLimit = 16,
+            epSelfModifyingCallStubLookaheadLimit = 16,
+            epSelfModifyingCallStubNeutralInstructionLimit = 2,
+            epRepeatedSelfModifyingCallStubLookaheadLimit = 24,
+            epRepeatedSelfModifyingCallStubRequiredCount = 3,
+            epRepeatedSelfModifyingCallStubMaximumWriteDistance = 0x100,
             epShiftRotatePattern = /^(?:SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR) (.+), (0X[0-9A-F]+|\d+)$/i,
             epStackMutationPattern = /^(ADD|SUB|ADC|SBB|AND|OR|XOR|INC|DEC|NEG|NOT|SAL|SHL|SHR|SAR|ROL|ROR|RCL|RCR|XADD|XCHG) (?:(?:BYTE|WORD|DWORD|QWORD) PTR )?(?:[A-Z]+:)?\[[^\]]*\b(?:ESP|RSP)\b[^\]]*\](?:,|$)/i,
             epPopGeneralPurposeRegisterPattern = new RegExp("^POP (" + epGeneralPurposeRegister + ")$", "i"),
@@ -6448,6 +6468,25 @@ function scanForObfuscations_Native() {
             epWordRegisterPattern = /^(?:AX|BX|CX|DX|SP|BP|SI|DI|R(?:8|9|1[0-5])W)$/i,
             epDwordRegisterPattern = /^(?:E(?:AX|BX|CX|DX|SP|BP|SI|DI)|R(?:8|9|1[0-5])D)$/i,
             epQwordRegisterPattern = /^(?:R(?:AX|BX|CX|DX|SP|BP|SI|DI|8|9|1[0-5]))$/i,
+            epSelfModifyingCallStubNativePointer = PE_Cached.isI386 ? "DWORD" : "QWORD",
+            epSelfModifyingCallStubNativeAccumulator = PE_Cached.isI386 ? "EAX" : "RAX",
+            epSelfModifyingCallStubReturnStorePattern = new RegExp("^POP " + epSelfModifyingCallStubNativePointer + " PTR (?:[A-Z]+:)?\\[[^\\]]+\\]$", "i"),
+            epSelfModifyingCallStubAccumulatorPushPattern = new RegExp("^PUSH " + epSelfModifyingCallStubNativeAccumulator + "$", "i"),
+            epSelfModifyingCallStubKeyLoadPattern = /^MOV EAX, (?:(?:DWORD PTR )?(?:[A-Z]+:)?\[[^\]]+\]|0X[0-9A-F]+|\d+)$/i,
+            epSelfModifyingCallStubDecodePattern = /^(?:LEA EAX, \[EAX (?:\+|-) (?:0X[0-9A-F]+|\d+)\]|(?:ADD|SUB|XOR) EAX, (?:0X[0-9A-F]+|\d+))$/i,
+            epSelfModifyingCallStubWritePattern = /^XCHG DWORD PTR (?:[A-Z]+:)?\[(?:RIP\s*([+-])\s*(0X[0-9A-F]+|\d+)|(0X[0-9A-F]+|\d+))\], EAX$/i,
+            epSelfModifyingCallStubAccumulatorPopPattern = new RegExp("^POP " + epSelfModifyingCallStubNativeAccumulator + "$", "i"),
+            epRepeatedSelfModifyingCallStubNativeRegister = PE_Cached.isI386 ?
+                "E(?:AX|BX|CX|DX|SI|DI|BP)" : "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
+            epRepeatedSelfModifyingCallStubStackPointer = PE_Cached.isI386 ? "ESP" : "RSP",
+            epRepeatedSelfModifyingCallStubReturnReadPattern = new RegExp("^(?:POP (?:" +
+                epSelfModifyingCallStubNativePointer + " PTR (?:[A-Z]+:)?\\[[^\\]]+\\]|" +
+                epRepeatedSelfModifyingCallStubNativeRegister + ")|(?:MOV|LEA) " +
+                epRepeatedSelfModifyingCallStubNativeRegister + ", (?:" +
+                epSelfModifyingCallStubNativePointer + " PTR )?(?:[A-Z]+:)?\\[" +
+                epRepeatedSelfModifyingCallStubStackPointer + "(?:\\s*[+-]\\s*(?:0X[0-9A-F]+|\\d+))?\\])$", "i"),
+            epRepeatedSelfModifyingCallStubTransformPattern = new RegExp("^(?:ADD|ADC|SUB|SBB|XOR|AND|OR|NOT|NEG|ROL|ROR|RCL|RCR|LEA|MOVZX|MOVSX|MOVSXD|BSWAP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
+            epRepeatedSelfModifyingCallStubWritePattern = new RegExp("^(?:MOV|XCHG|CMPXCHG) (?:BYTE|WORD|DWORD|QWORD) PTR (?:[A-Z]+:)?\\[(?:RIP\\s*([+-])\\s*(0X[0-9A-F]+|\\d+)|(0X[0-9A-F]+|\\d+))\\], (" + epGeneralPurposeRegister + ")$", "i"),
             epComplexStackMutationOpCodes = [
                 "NEG", "NOT", "SAL", "SHL", "SHR", "SAR", "ROL", "ROR", "RCL", "RCR", "XADD", "XCHG"
             ],
@@ -6588,10 +6627,212 @@ function scanForObfuscations_Native() {
             }
         }
 
-        // A Pop at a call target is not sufficient by itself: calling-convention adapters
-        // may discard the return address without using it. Confirm that the recovered value
-        // is read before it can be overwritten or invalidated by another control transfer.
+        // Reuse the reachable direct-call set for two independent behavioral proofs.
         for (var epDirectCallTargetKey in epDirectCallTargets) {
+            var epDirectCallTargetAddress = parseInt(epDirectCallTargetKey, 10);
+
+            if (epSelfModifyingCallStubAddress === -1) {
+                var epSelfModifyingCallStubTargetRva = epDirectCallTargetAddress - PE.getImageBase(),
+                    epSelfModifyingCallStubSectionIndex = -1;
+
+                // A normal compiler has no reason to call a physically-backed writable code
+                // area which reconstructs its own nearby instructions. The section check
+                // excludes ordinary thunks before the instruction proof begins.
+                for (var d = 0; d < PE_Cached.numberOfSections && epSelfModifyingCallStubSectionIndex === -1; d++) {
+                    var epSelfModifyingCallStubSectionRva = PE.getSectionVirtualAddress(d),
+                        epSelfModifyingCallStubSectionRawSize = PE.getSectionFileSize(d),
+                        epSelfModifyingCallStubSectionCharacteristics = PE.section[d].Characteristics;
+
+                    if (epSelfModifyingCallStubTargetRva >= epSelfModifyingCallStubSectionRva &&
+                        epSelfModifyingCallStubTargetRva < epSelfModifyingCallStubSectionRva + epSelfModifyingCallStubSectionRawSize &&
+                        (epSelfModifyingCallStubSectionCharacteristics & (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) ===
+                        (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) {
+                        epSelfModifyingCallStubSectionIndex = d;
+                    }
+                }
+
+                if (epSelfModifyingCallStubSectionIndex !== -1) {
+                    var epSelfModifyingCallStubCurrentAddress = epDirectCallTargetAddress,
+                        epSelfModifyingCallStubState = 0,
+                        epSelfModifyingCallStubNeutralInstructionCount = 0,
+                        epSelfModifyingCallStubWriteAddress = -1;
+
+                    // The concrete profile follows fixed semantics rather than exact bytes:
+                    // consume the return address, preserve the accumulator, derive a DWORD,
+                    // atomically write it into the instruction immediately following Pause,
+                    // and restore state.
+                    // Two neutral instructions per stage tolerate simple polymorphic padding
+                    // without allowing unrelated code to assemble a proof accidentally.
+                    for (var epSelfModifyingCallStubIndex = 0;
+                        epSelfModifyingCallStubIndex < epSelfModifyingCallStubLookaheadLimit &&
+                        epSelfModifyingCallStubAddress === -1;
+                        epSelfModifyingCallStubIndex++) {
+                        var epSelfModifyingCallStubCurrentRva = epSelfModifyingCallStubCurrentAddress - PE.getImageBase();
+
+                        if (epSelfModifyingCallStubCurrentRva < epSelfModifyingCallStubSectionRva ||
+                            epSelfModifyingCallStubCurrentRva >= epSelfModifyingCallStubSectionRva + epSelfModifyingCallStubSectionRawSize ||
+                            PE.VAToOffset(epSelfModifyingCallStubCurrentAddress) === -1) break;
+
+                        var epSelfModifyingCallStubInstruction = PE.getDisasmString(epSelfModifyingCallStubCurrentAddress),
+                            epSelfModifyingCallStubOpCode = getAsmOpCode(epSelfModifyingCallStubInstruction),
+                            epSelfModifyingCallStubInstructionLength = PE.getDisasmLength(epSelfModifyingCallStubCurrentAddress),
+                            epSelfModifyingCallStubStageMatched = false,
+                            epSelfModifyingCallStubWrite;
+
+                        if (!epSelfModifyingCallStubOpCode || epSelfModifyingCallStubInstructionLength <= 0) break;
+
+                        if (epSelfModifyingCallStubState === 0) {
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubReturnStorePattern.test(epSelfModifyingCallStubInstruction);
+                        } else if (epSelfModifyingCallStubState === 1) {
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubAccumulatorPushPattern.test(epSelfModifyingCallStubInstruction);
+                        } else if (epSelfModifyingCallStubState === 2) {
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubKeyLoadPattern.test(epSelfModifyingCallStubInstruction);
+                        } else if (epSelfModifyingCallStubState === 3) {
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubDecodePattern.test(epSelfModifyingCallStubInstruction);
+                        } else if (epSelfModifyingCallStubState === 4) {
+                            epSelfModifyingCallStubWrite = epSelfModifyingCallStubInstruction.match(epSelfModifyingCallStubWritePattern);
+                            epSelfModifyingCallStubStageMatched = Boolean(epSelfModifyingCallStubWrite);
+
+                            if (epSelfModifyingCallStubWrite) {
+                                if (epSelfModifyingCallStubWrite[3]) {
+                                    epSelfModifyingCallStubWriteAddress = parseInt(epSelfModifyingCallStubWrite[3], 0);
+                                } else {
+                                    var epSelfModifyingCallStubDisplacement = parseInt(epSelfModifyingCallStubWrite[2], 0);
+
+                                    if (epSelfModifyingCallStubWrite[1] === "-") epSelfModifyingCallStubDisplacement = -epSelfModifyingCallStubDisplacement;
+
+                                    epSelfModifyingCallStubWriteAddress = epSelfModifyingCallStubCurrentAddress +
+                                        epSelfModifyingCallStubInstructionLength + epSelfModifyingCallStubDisplacement;
+                                }
+                            }
+                        } else if (epSelfModifyingCallStubState === 5) {
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubAccumulatorPopPattern.test(epSelfModifyingCallStubInstruction);
+                        } else if (epSelfModifyingCallStubState === 6) {
+                            // The bundled disassembler may canonicalize F3 90 to Nop even
+                            // though the prefix deliberately serializes the code rewrite.
+                            epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubOpCode === "PAUSE" ||
+                                PE.compare("F3 90", PE.VAToOffset(epSelfModifyingCallStubCurrentAddress));
+                        }
+
+                        if (epSelfModifyingCallStubStageMatched) {
+                            epSelfModifyingCallStubState++;
+                            epSelfModifyingCallStubNeutralInstructionCount = 0;
+
+                            if (epSelfModifyingCallStubState === 7 &&
+                                epSelfModifyingCallStubWriteAddress === epSelfModifyingCallStubCurrentAddress + epSelfModifyingCallStubInstructionLength) {
+                                epSelfModifyingCallStubAddress = epDirectCallTargetAddress;
+                            }
+                        } else if ((epSelfModifyingCallStubOpCode === "NOP" || epSelfModifyingCallStubOpCode === "FNOP" ||
+                            epSimplePolymorphicInstructionPattern.test(epSelfModifyingCallStubInstruction) ||
+                            epValuePreservingInstructionPattern.test(epSelfModifyingCallStubInstruction)) &&
+                            epSelfModifyingCallStubNeutralInstructionCount < epSelfModifyingCallStubNeutralInstructionLimit) {
+                            epSelfModifyingCallStubNeutralInstructionCount++;
+                        } else {
+                            break;
+                        }
+
+                        epSelfModifyingCallStubCurrentAddress += epSelfModifyingCallStubInstructionLength;
+                    }
+
+                    if (epSelfModifyingCallStubAddress === -1) {
+                        var epRepeatedSelfModifyingCallStubCurrentAddress = epDirectCallTargetAddress,
+                            epRepeatedSelfModifyingCallStubReturnReadPresent = false,
+                            epRepeatedSelfModifyingCallStubTransformPresent = false,
+                            epRepeatedSelfModifyingCallStubTransformRegister = String();
+
+                        // The generic profile deliberately ignores exact registers and arithmetic.
+                        // Requiring three distinct called stubs in the same writable code section
+                        // compensates for that freedom. Each stub must recover its return address,
+                        // transform a register value, and write back into its own nearby code bytes.
+                        for (var epRepeatedSelfModifyingCallStubIndex = 0;
+                            epRepeatedSelfModifyingCallStubIndex < epRepeatedSelfModifyingCallStubLookaheadLimit &&
+                            epSelfModifyingCallStubAddress === -1;
+                            epRepeatedSelfModifyingCallStubIndex++) {
+                            var epRepeatedSelfModifyingCallStubCurrentRva = epRepeatedSelfModifyingCallStubCurrentAddress - PE.getImageBase();
+
+                            if (epRepeatedSelfModifyingCallStubCurrentRva < epSelfModifyingCallStubSectionRva ||
+                                epRepeatedSelfModifyingCallStubCurrentRva >= epSelfModifyingCallStubSectionRva + epSelfModifyingCallStubSectionRawSize ||
+                                PE.VAToOffset(epRepeatedSelfModifyingCallStubCurrentAddress) === -1) break;
+
+                            var epRepeatedSelfModifyingCallStubInstruction = PE.getDisasmString(epRepeatedSelfModifyingCallStubCurrentAddress),
+                                epRepeatedSelfModifyingCallStubOpCode = getAsmOpCode(epRepeatedSelfModifyingCallStubInstruction),
+                                epRepeatedSelfModifyingCallStubInstructionLength = PE.getDisasmLength(epRepeatedSelfModifyingCallStubCurrentAddress),
+                                epRepeatedSelfModifyingCallStubWrite = undefined;
+
+                            if (!epRepeatedSelfModifyingCallStubOpCode ||
+                                epRepeatedSelfModifyingCallStubInstructionLength <= 0) break;
+
+                            if (!epRepeatedSelfModifyingCallStubReturnReadPresent) {
+                                epRepeatedSelfModifyingCallStubReturnReadPresent = epRepeatedSelfModifyingCallStubReturnReadPattern.test(epRepeatedSelfModifyingCallStubInstruction);
+                            } else if (!epRepeatedSelfModifyingCallStubTransformPresent) {
+                                var epRepeatedSelfModifyingCallStubTransform = epRepeatedSelfModifyingCallStubInstruction.match(epRepeatedSelfModifyingCallStubTransformPattern);
+
+                                if (epRepeatedSelfModifyingCallStubTransform) {
+                                    epRepeatedSelfModifyingCallStubTransformRegister = epRepeatedSelfModifyingCallStubTransform[1].toUpperCase();
+                                    epRepeatedSelfModifyingCallStubTransformPresent = true;
+                                }
+                            }
+
+                            if (epRepeatedSelfModifyingCallStubReturnReadPresent &&
+                                epRepeatedSelfModifyingCallStubTransformPresent) {
+                                epRepeatedSelfModifyingCallStubWrite = epRepeatedSelfModifyingCallStubInstruction.match(epRepeatedSelfModifyingCallStubWritePattern);
+
+                                if (epRepeatedSelfModifyingCallStubWrite &&
+                                    epRepeatedSelfModifyingCallStubWrite[4].toUpperCase() !== epRepeatedSelfModifyingCallStubTransformRegister) {
+                                    break;
+                                }
+                            }
+
+                            if (epRepeatedSelfModifyingCallStubWrite) {
+                                var epRepeatedSelfModifyingCallStubWriteAddress;
+
+                                if (epRepeatedSelfModifyingCallStubWrite[3]) {
+                                    epRepeatedSelfModifyingCallStubWriteAddress = parseInt(epRepeatedSelfModifyingCallStubWrite[3], 0);
+                                } else {
+                                    var epRepeatedSelfModifyingCallStubDisplacement = parseInt(epRepeatedSelfModifyingCallStubWrite[2], 0);
+
+                                    if (epRepeatedSelfModifyingCallStubWrite[1] === "-") {
+                                        epRepeatedSelfModifyingCallStubDisplacement = -epRepeatedSelfModifyingCallStubDisplacement;
+                                    }
+
+                                    epRepeatedSelfModifyingCallStubWriteAddress = epRepeatedSelfModifyingCallStubCurrentAddress +
+                                        epRepeatedSelfModifyingCallStubInstructionLength + epRepeatedSelfModifyingCallStubDisplacement;
+                                }
+
+                                var epRepeatedSelfModifyingCallStubSectionAddress = PE.getImageBase() + epSelfModifyingCallStubSectionRva;
+
+                                if (epRepeatedSelfModifyingCallStubWriteAddress >= epRepeatedSelfModifyingCallStubSectionAddress &&
+                                    epRepeatedSelfModifyingCallStubWriteAddress < epRepeatedSelfModifyingCallStubSectionAddress + epSelfModifyingCallStubSectionRawSize &&
+                                    Math.abs(epRepeatedSelfModifyingCallStubWriteAddress - epDirectCallTargetAddress) <=
+                                    epRepeatedSelfModifyingCallStubMaximumWriteDistance) {
+                                    var epRepeatedSelfModifyingCallStubSectionKey = epSelfModifyingCallStubSectionIndex.toString();
+
+                                    if (!epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey]) {
+                                        epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey] = 0;
+                                    }
+
+                                    epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey]++;
+
+                                    if (epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey] >=
+                                        epRepeatedSelfModifyingCallStubRequiredCount) {
+                                        epSelfModifyingCallStubAddress = epDirectCallTargetAddress;
+                                    }
+                                }
+
+                                break;
+                            }
+
+                            if (epScanStopOpCodes.indexOf(epRepeatedSelfModifyingCallStubOpCode) !== -1) break;
+
+                            epRepeatedSelfModifyingCallStubCurrentAddress += epRepeatedSelfModifyingCallStubInstructionLength;
+                        }
+                    }
+                }
+            }
+
+            // A Pop at a call target is not sufficient by itself: calling-convention adapters
+            // may discard the return address without using it. Confirm that the recovered value
+            // is read before it can be overwritten or invalidated by another control transfer.
             var epIpRecoveryRegister = epPopRegisterByAddress[epDirectCallTargetKey];
 
             if (!epIpRecoveryRegister) continue;
@@ -6696,7 +6937,7 @@ function scanForObfuscations_Native() {
 
     var isCallPopEpIpRecoveryPresent = false;
 
-    if (epCallPopIpRecoveryAddress !== -1) {
+    if (!PE_Cached.isDynamicLinkLibrary && epCallPopIpRecoveryAddress !== -1) {
         log(logType.any, "Call/Pop IP recovery near EP");
 
         isCallPopEpIpRecoveryPresent = true;
@@ -6707,13 +6948,29 @@ function scanForObfuscations_Native() {
 
 
 
+    // Check for called stubs which reconstruct their own nearby executable bytes
+
+    var isSelfModifyingEpCallStubPresent = false;
+
+    if (epSelfModifyingCallStubAddress !== -1) {
+        log(logType.any, "Self-modifying call stub near EP: 0x" + epSelfModifyingCallStubAddress.toString(16));
+
+        isSelfModifyingEpCallStubPresent = true;
+    }
+
+    if (isSelfModifyingEpCallStubPresent) options = addOption(options, "Self-modifying stubs near EP");
+
+
+
+
     // Check for carry-fed bitstream decoding combined with repeated byte-string copying.
     // Neither operation is distinctive alone; the indirect transfer makes the dense pair
     // specific to a dispatcher-style unpacking loop while retaining register polymorphism.
 
     var isBitstreamEpUnpackerPresent = false;
 
-    if (epBitstreamAdcCount >= 8 && epBitstreamMovsbCount >= 2 && epBitstreamIndirectTransferPresent) {
+    if (!PE_Cached.isDynamicLinkLibrary &&
+        epBitstreamAdcCount >= 8 && epBitstreamMovsbCount >= 2 && epBitstreamIndirectTransferPresent) {
         log(logType.any, "Bitstream unpacker near EP: Adc: " + epBitstreamAdcCount + ", Rep Movsb: " + epBitstreamMovsbCount);
 
         isBitstreamEpUnpackerPresent = true;
@@ -6728,7 +6985,7 @@ function scanForObfuscations_Native() {
 
     var isNoncanonicalEpShiftPresent = false;
 
-    if (epNoncanonicalShiftCount >= 5) {
+    if (!PE_Cached.isDynamicLinkLibrary && epNoncanonicalShiftCount >= 5) {
         log(logType.any, "Noncanonical shifts near EP: " + epNoncanonicalShiftCount);
 
         isNoncanonicalEpShiftPresent = true;
@@ -6743,7 +7000,7 @@ function scanForObfuscations_Native() {
 
     var isComplexEpStackMutationPresent = false;
 
-    if (epStackMutationCount >= 4 && epComplexStackMutationCount !== 0) {
+    if (!PE_Cached.isDynamicLinkLibrary && epStackMutationCount >= 4 && epComplexStackMutationCount !== 0) {
         log(logType.any, "Stack mutations near EP: " + epStackMutationCount + " (complex: " + epComplexStackMutationCount + ")");
 
         isComplexEpStackMutationPresent = true;
@@ -6760,7 +7017,8 @@ function scanForObfuscations_Native() {
 
     var isMixedEpBitOpsPresent = false;
 
-    if (epFlagsTransferPresent && epRolPresent && epRorPresent && epAdcPresent && epRareBitOpCount >= 5) {
+    if (!PE_Cached.isDynamicLinkLibrary &&
+        epFlagsTransferPresent && epRolPresent && epRorPresent && epAdcPresent && epRareBitOpCount >= 5) {
         log(logType.any, "Mixed bit-operation families near EP: " + epRareBitOpCount);
 
         isMixedEpBitOpsPresent = true;
