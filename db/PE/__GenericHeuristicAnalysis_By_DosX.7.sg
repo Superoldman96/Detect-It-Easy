@@ -3696,8 +3696,36 @@ function scanForBadFileFormat_NET_and_Native() {
 
     var isEntryPointIncorrect = false;
 
-    if (!PE.isEntryPointCorrect() ||
-        /^DB /.test(PE_Cached.firstEpAsmInstruction)) { // Invalid first EP instruction (DB) can indicate that the EP is damaged or pointing to the wrong place
+    var isTlsVirtualEntryPoint = false;
+
+    const isEntryPointCorrect = PE.isEntryPointCorrect();
+
+    if (PE.isTLSPresent()) {
+        const corruptedDataEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE.getImageBase();
+
+        if (corruptedDataEntryPointRva > 0) {
+            for (var i = 0; i < PE_Cached.numberOfSections && !isTlsVirtualEntryPoint; i++) {
+                var corruptedDataSectionRva = PE.getSectionVirtualAddress(i),
+                    corruptedDataSectionFileSize = PE.getSectionFileSize(i),
+                    corruptedDataSectionMappedSize = Math.max(PE.getSectionVirtualSize(i), corruptedDataSectionFileSize),
+                    corruptedDataEntryPointOffset = corruptedDataEntryPointRva - corruptedDataSectionRva;
+
+                // The loader maps this range as zero-filled memory even though no bytes exist
+                // in the file. A TLS callback may populate it before normal EP execution.
+                if (corruptedDataEntryPointOffset >= corruptedDataSectionFileSize &&
+                    corruptedDataEntryPointOffset >= 0 &&
+                    corruptedDataEntryPointOffset < corruptedDataSectionMappedSize &&
+                    (PE.section[i].Characteristics & SECTION_FLAGS_EXECUTE)) {
+                    isTlsVirtualEntryPoint = true;
+                }
+            }
+        }
+    }
+
+    // A DB pseudo-instruction normally means that the EP is damaged or points to data.
+    // It is expected when a TLS callback owns a deliberately virtual-only startup area.
+    if (!isTlsVirtualEntryPoint &&
+        (!isEntryPointCorrect || /^DB /.test(PE_Cached.firstEpAsmInstruction))) {
         isEntryPointIncorrect = true;
     }
 
