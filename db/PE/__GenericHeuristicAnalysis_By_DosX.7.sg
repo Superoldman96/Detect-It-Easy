@@ -1667,12 +1667,15 @@ function scanForAntiAnalysis_Native() {
         // and invalidate only registers that are explicitly overwritten by polymorphic junk.
         var antiDebugPebRegisters = {};
 
+        // Walk the bounded EP stream shared by native heuristics. Stop as soon as one
+        // complete anti-debug proof is found because the verdict retains only its type.
         for (var i = 0; i < 256 && !isNativeAntiDebugPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
+            // Classify the instruction once so the state transitions below remain explicit.
             var pebLoad = currentEpInstruction.match(antiDebugPebLoadPattern),
                 pebDebugFieldAccess = currentEpInstruction.match(antiDebugPebFieldAccessPattern),
                 registerCopy = currentEpInstruction.match(antiDebugRegisterCopyPattern),
@@ -1684,21 +1687,25 @@ function scanForAntiAnalysis_Native() {
                     /^(?:MOV|MOVZX|MOVSX|CMP|TEST|AND)$/.test(currentEpOpCode);
 
             if (currentEpOpCode === "MOV" && antiDebugRegisterAccessPattern.test(currentEpInstruction)) {
+                // Any explicit MOV involving DR0-DR7 is already a complete register-based proof.
                 log(logType.any, "Debug-register access near EP: " + currentEpInstruction);
 
                 nativeAntiDebugType = "REG";
                 isNativeAntiDebugPresent = true;
             } else if (isPebDebugFieldAccess) {
+                // Accept a debug-field read only through a register proven to contain the PEB.
                 log(logType.any, "PEB debug-field access near EP: " + currentEpInstruction);
 
                 nativeAntiDebugType = "PEB";
                 isNativeAntiDebugPresent = true;
             } else if (pebLoad) {
+                // Seed pointer provenance from the architecture-specific FS/GS PEB slot.
                 antiDebugPebRegisters[pebLoad[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String())] = true;
             } else if (registerCopy) {
                 var registerCopyDestination = registerCopy[1].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String()),
                     registerCopySource = registerCopy[2].toUpperCase().replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
 
+                // Copy or clear only the destination proof according to the source provenance.
                 if (antiDebugPebRegisters[registerCopySource]) {
                     antiDebugPebRegisters[registerCopyDestination] = true;
                 } else {
@@ -1717,6 +1724,7 @@ function scanForAntiAnalysis_Native() {
                 var valuePreservingRegister = (valuePreservingInstruction[1] || valuePreservingInstruction[2]).toUpperCase(),
                     valuePreservingRegisterKey = valuePreservingRegister.replace(antiDebugRegister32BitPrefixPattern, "R").replace(antiDebugRegister32BitSuffixPattern, String());
 
+                // Full-width neutral arithmetic preserves a pointer; an r32 form truncates it.
                 if (PE_Cached.is64bit && antiDebugRegister32BitPattern.test(valuePreservingRegister)) {
                     delete antiDebugPebRegisters[valuePreservingRegisterKey];
                 }
@@ -1729,6 +1737,7 @@ function scanForAntiAnalysis_Native() {
 
                 delete antiDebugPebRegisters[registerWriteKey];
             } else {
+                // Unknown semantics may clobber any alias, so discard the whole proof set.
                 antiDebugPebRegisters = {};
 
                 // CALL retains a physical fall-through path but may clobber registers, so
@@ -5399,13 +5408,16 @@ function scanForObfuscations_Native() {
         // most recent instruction that established deterministic EFLAGS. A MOV may extend
         // the first fact without replacing the second because MOV itself preserves flags.
 
+        // Scan one physical fall-through path. The first control-flow boundary terminates
+        // the proof so flags from one basic block cannot be paired with another block's Jcc.
         for (var i = 0; i < 256 && !isOpaqueEpBranchPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
-            // These forms deterministically set the flags consumed by a following Jcc.
+            // Split each instruction into flag producers, value-provenance operations,
+            // candidate consumers, and harmless padding before updating either fact set.
             var zeroFlagsInstruction = currentEpInstruction.match(new RegExp("^(?:(?:XOR|SUB|CMP) (" + epFlagsGeneralPurposeRegister + "), \\1|AND (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+)|TEST (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+))$", "i")),
                 allOnesFlagsInstruction = currentEpInstruction.match(opaqueEpAllOnesPattern),
                 carryFlagsInstruction = currentEpInstruction.match(/^(CLC|STC)$/),
@@ -5459,6 +5471,9 @@ function scanForObfuscations_Native() {
             } else if (zeroLiteralRegister) {
                 // MOV reg, 0 preserves prior flags but enables a later TEST/OR reg, reg.
                 opaqueEpKnownZeroRegisters[zeroLiteralRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] = true;
+
+                // A value-propagation instruction still consumes the bounded padding budget
+                // of an older EFLAGS proof; expire that proof without losing known zeroes.
                 if (opaqueEpOriginInstruction && ++opaqueEpNeutralInstructionCount > epNeutralInstructionLimit) {
                     opaqueEpOriginInstruction = String();
                     opaqueEpNeutralInstructionCount = 0;
@@ -5504,6 +5519,7 @@ function scanForObfuscations_Native() {
                     opaqueEpNeutralInstructionCount = 0;
                 }
             } else if (isNeutralInstruction) {
+                // Pure padding preserves both facts, but only within the configured distance.
                 if (opaqueEpOriginInstruction && ++opaqueEpNeutralInstructionCount > epNeutralInstructionLimit) {
                     opaqueEpOriginInstruction = String();
                     opaqueEpNeutralInstructionCount = 0;
@@ -5934,12 +5950,15 @@ function scanForObfuscations_Native() {
         // Unknown instructions discard all proofs but may begin a new chain later.
         var pebModuleWalkRegisterStates = {};
 
+        // Search the bounded EP stream for the ordered PEB -> Ldr -> module-list chain.
+        // Per-register states allow the chain to survive register substitution and copies.
         for (var i = 0; i < 256 && !isPebModuleWalkPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
+            // Decode all state-producing and state-destroying forms before advancing the chain.
             var pebPointerLoad = currentEpInstruction.match(pebModuleWalkPebLoadPattern),
                 ldrPointerLoad = currentEpInstruction.match(pebModuleWalkLdrLoadPattern),
                 moduleListLoad = currentEpInstruction.match(pebModuleWalkListLoadPattern),
@@ -5953,8 +5972,10 @@ function scanForObfuscations_Native() {
             if (pebPointerLoad) {
                 var pebRegister = pebPointerLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
 
+                // State 1 marks an architecture-width pointer read directly from FS/GS.
                 pebModuleWalkRegisterStates[pebRegister] = 1;
             } else if (moduleListLoad && pebModuleWalkRegisterStates[moduleListLoad[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] === 2) {
+                // Reading a loader list through a proven Ldr pointer completes the proof.
                 log(logType.any, "PEB loader module-list walk near EP: " + currentEpInstruction);
 
                 isPebModuleWalkPresent = true;
@@ -5962,12 +5983,14 @@ function scanForObfuscations_Native() {
                 var ldrDestinationRegister = ldrPointerLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
                     ldrSourceRegister = ldrPointerLoad[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
 
+                // Promote only a destination loaded through a proven PEB pointer to state 2.
                 if (pebModuleWalkRegisterStates[ldrSourceRegister] === 1) {
                     pebModuleWalkRegisterStates[ldrDestinationRegister] = 2;
                 } else {
                     delete pebModuleWalkRegisterStates[ldrDestinationRegister];
                 }
             } else if (moduleListLoad) {
+                // An unproven list-shaped load overwrites its destination with unknown data.
                 delete pebModuleWalkRegisterStates[moduleListLoad[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
             } else if (registerCopy) {
                 var pebModuleWalkCopyDestination = registerCopy[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
@@ -5996,8 +6019,10 @@ function scanForObfuscations_Native() {
                 conditionalBranch || /^(?:CMP|TEST)$/.test(currentEpOpCode)) {
                 // These instructions preserve every proven pointer on the fall-through path.
             } else if (registerWrite) {
+                // A recognized write invalidates only the overwritten physical register.
                 delete pebModuleWalkRegisterStates[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
             } else {
+                // Unmodelled semantics may alter every tracked pointer; restart the chain.
                 pebModuleWalkRegisterStates = {};
 
                 if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
@@ -6023,6 +6048,8 @@ function scanForObfuscations_Native() {
         // In the 28-byte x87 environment, the saved instruction pointer begins at
         // offset 0xC. Writing the environment at ESP-0xC therefore places EIP at
         // the current stack top, where a following POP can recover it.
+        // Advance by physical instruction length because raw x87 encodings may be
+        // rendered inconsistently by the disassembler used by different DiE builds.
         for (var i = 0; i < 256 && !isFpuEpRecoveryPresent; i++) {
             var currentEpInstruction = PE.getDisasmString(fpuEpCurrentAddress),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction),
@@ -6038,8 +6065,10 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode || currentEpInstructionLength <= 0) break; // Safety check
 
             if (storesRawFpuEnvironmentAtStack) {
+                // Override the decoded length with the exact short or long raw encoding.
                 currentEpInstructionLength = PE.compare("D9 74 24 F4", currentEpOffset) ? 4 : 7;
             } else if (isRawFpuNop) {
+                // Treat FNOP bytes atomically even when their textual decoding differs.
                 currentEpInstructionLength = 2;
             }
 
@@ -6052,9 +6081,11 @@ function scanForObfuscations_Native() {
                     (registerWrite && currentEpOpCode !== "POP") || /^(?:CMP|TEST)$/.test(currentEpOpCode);
 
             if (storesFpuEnvironmentAtStack || storesRawFpuEnvironmentAtStack) {
+                // Remember that the current stack top now contains the saved x87 EIP field.
                 isFpuEnvironmentStored = true;
                 fpuEpNeutralInstructionCount = 0;
             } else if (popsNativeRegister && isFpuEnvironmentStored) {
+                // A native-width POP consumes the saved EIP and completes the recovery idiom.
                 log(logType.any, "FPU EIP recovery near EP: " + currentEpInstruction);
 
                 isFpuEpRecoveryPresent = true;
@@ -6063,12 +6094,14 @@ function scanForObfuscations_Native() {
                 // Register-only junk cannot move the stack slot containing the saved EIP.
                 fpuEpNeutralInstructionCount++;
             } else {
+                // A stack-affecting or unknown instruction invalidates the saved-slot proof.
                 isFpuEnvironmentStored = false;
                 fpuEpNeutralInstructionCount = 0;
 
                 if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
             }
 
+            // Continue the physical fall-through sweep using the validated instruction size.
             fpuEpCurrentAddress += currentEpInstructionLength;
         }
     }
@@ -6095,12 +6128,16 @@ function scanForObfuscations_Native() {
             "VMXOFF", "VMXON", "WBINVD", "WRMSR", "XSETBV"
         ];
 
+        // Sweep only the bounded user-mode startup path; the first privileged operation
+        // is sufficient because its concrete opcode is preserved in the verdict.
         for (var i = 0; i < 256 && !isPrivilegedEpOpCodePresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
+            // MOV requires operand inspection because ordinary register moves are legal,
+            // while any access to CR0-CR8 is privileged in a user-mode image.
             var isControlRegisterAccess = currentEpOpCode === "MOV" && /\bCR[0-8]\b/i.test(currentEpInstruction);
 
             if (privilegedEpOpCodes.indexOf(currentEpOpCode) !== -1 || isControlRegisterAccess) {
@@ -6109,6 +6146,7 @@ function scanForObfuscations_Native() {
                 privilegedEpOpCodeDetected = currentEpOpCode;
                 isPrivilegedEpOpCodePresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                // Do not decode bytes beyond a terminal transfer as the same startup path.
                 break;
             }
         }
@@ -6127,6 +6165,8 @@ function scanForObfuscations_Native() {
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
         const systemEpProbeOpCodes = ["SGDT", "SIDT", "SLDT", "SMSW", "STR"];
 
+        // These non-privileged probes are distinctive only while they remain close to the
+        // process entry path, so stop the bounded sweep at a terminal transfer.
         for (var i = 0; i < 256 && !isSystemEpProbePresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
@@ -6134,10 +6174,12 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode) break; // Safety check
 
             if (systemEpProbeOpCodes.indexOf(currentEpOpCode) !== -1) {
+                // One descriptor-table or machine-status read is a complete probe proof.
                 log(logType.any, "System-state probe near EP: " + currentEpInstruction);
 
                 isSystemEpProbePresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                // Calls may return to the fall-through path; other stop opcodes may not.
                 break;
             }
         }
@@ -6154,6 +6196,8 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        // Scan the bounded startup stream for kernel-entry instructions emitted directly
+        // by the image rather than reached through an imported operating-system wrapper.
         for (var i = 0; i < 256 && !isDirectEpSystemCallPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
@@ -6162,10 +6206,12 @@ function scanForObfuscations_Native() {
 
             if (currentEpOpCode === "SYSCALL" || currentEpOpCode === "SYSENTER" ||
                 /^INT (?:0X0*2E|46)$/i.test(currentEpInstruction)) {
+                // Cover native x64/x86 fast calls and the legacy Windows INT 2E gateway.
                 log(logType.any, "Direct system call near EP: " + currentEpInstruction);
 
                 isDirectEpSystemCallPresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
+                // A terminal transfer ends the startup stream before unrelated bytes.
                 break;
             }
         }
@@ -6192,6 +6238,8 @@ function scanForObfuscations_Native() {
         // the fall-through stream; a direct target inside one of those byte ranges proves
         // an alternate overlapping decode. Targets outside the bounded sweep are ignored.
 
+        // Phase one records every canonical instruction boundary and every valid direct
+        // control-flow target encountered in the same physical byte stream.
         for (var i = 0; i < 256; i++) {
             var currentEpInstruction = PE.getDisasmString(overlappingEpCurrentAddress),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction),
@@ -6199,6 +6247,7 @@ function scanForObfuscations_Native() {
 
             if (!currentEpOpCode || currentEpInstructionLength <= 0) break; // Safety check
 
+            // Mark the start before advancing so a later target can be compared exactly.
             overlappingEpInstructionStarts[overlappingEpCurrentAddress.toString()] = true;
             overlappingEpScannedEndAddress = overlappingEpCurrentAddress + currentEpInstructionLength;
 
@@ -6207,6 +6256,7 @@ function scanForObfuscations_Native() {
             if (directControlFlow) {
                 var directControlFlowTarget = parseInt(directControlFlow[1], 0);
 
+                // Ignore external and unmapped targets because their byte boundaries are unknown.
                 if (PE.VAToOffset(directControlFlowTarget) !== -1) {
                     overlappingEpBranchTargets.push(directControlFlowTarget);
                 }
@@ -6216,9 +6266,12 @@ function scanForObfuscations_Native() {
             // unconditional transfers end the linear byte stream before embedded data.
             if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
 
+            // Move physically to the byte following the instruction, never to its branch target.
             overlappingEpCurrentAddress = overlappingEpScannedEndAddress;
         }
 
+        // Phase two reports only targets inside the scanned interval which do not coincide
+        // with any recorded instruction start; such a target necessarily overlaps bytes.
         for (var i = 0; i < overlappingEpBranchTargets.length && !isOverlappingEpCodePresent; i++) {
             var overlappingEpBranchTarget = overlappingEpBranchTargets[i];
 
@@ -6251,12 +6304,15 @@ function scanForObfuscations_Native() {
         // only its physical destination; calls and unknown instructions discard all proofs.
         var indirectEpKnownAddresses = {};
 
+        // Follow address provenance through the bounded EP stream until an indirect Call/Jmp
+        // consumes it or a control-flow boundary makes the linear proof ambiguous.
         for (var i = 0; i < 256 && !isIndirectEpTransferPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
+            // Classify producers, copies, consumers and invalidators before mutating provenance.
             var registerLiteralAddress = currentEpInstruction.match(epLiteralMovePattern),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
                 indirectTransfer = currentEpInstruction.match(indirectEpTransferPattern),
@@ -6273,9 +6329,11 @@ function scanForObfuscations_Native() {
                 var indirectEpTargetRegister = registerLiteralAddress[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String()),
                     indirectEpTargetAddress = parseInt(registerLiteralAddress[2], 0);
 
+                // Reject imprecise JavaScript integers before applying architectural truncation.
                 if (indirectEpTargetAddress <= epMaximumSafeInteger) {
                     if (epRegister32BitPattern.test(registerLiteralAddress[1])) indirectEpTargetAddress = indirectEpTargetAddress >>> 0;
 
+                    // Retain only literals which resolve back into the current PE image.
                     if (PE.VAToOffset(indirectEpTargetAddress) !== -1) {
                         indirectEpKnownAddresses[indirectEpTargetRegister] = indirectEpTargetAddress;
                     } else {
@@ -6306,12 +6364,14 @@ function scanForObfuscations_Native() {
                 var indirectTransferRegister = indirectTransfer[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
                 var indirectEpTargetAddress = indirectEpKnownAddresses[indirectTransferRegister];
 
+                // A mapped target consumed through its proven register completes the proof.
                 if (indirectEpTargetAddress !== undefined && PE.VAToOffset(indirectEpTargetAddress) !== -1) {
                     log(logType.any, "Indirect " + indirectTransfer[1].toUpperCase() + " transfer near EP to 0x" + indirectEpTargetAddress.toString(16));
 
                     isIndirectEpTransferPresent = true;
                 }
 
+                // Any indirect transfer ends the physical path, even when its target is unknown.
                 break;
             } else if (isNeutralInstruction || conditionalBranch || /^(?:CMP|TEST)$/.test(currentEpOpCode)) {
                 // These instructions preserve every general-purpose register on the
@@ -6326,6 +6386,7 @@ function scanForObfuscations_Native() {
                     valuePreservingAddress = indirectEpKnownAddresses[valuePreservingRegisterKey];
 
                 if (valuePreservingAddress !== undefined && PE_Cached.is64bit && epRegister32BitPattern.test(valuePreservingRegister)) {
+                    // Revalidate the zero-extended low DWORD before retaining its provenance.
                     valuePreservingAddress = valuePreservingAddress >>> 0;
 
                     if (PE.VAToOffset(valuePreservingAddress) !== -1) {
@@ -6335,8 +6396,10 @@ function scanForObfuscations_Native() {
                     }
                 }
             } else if (registerWrite) {
+                // A modeled write invalidates only the destination and preserves other proofs.
                 delete indirectEpKnownAddresses[registerWrite[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())];
             } else {
+                // Unknown semantics may consume or transform any address, so restart tracking.
                 indirectEpKnownAddresses = {};
 
                 if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") break;
@@ -6372,12 +6435,14 @@ function scanForObfuscations_Native() {
             trapFlagTestOpCode = String(),
             trapFlagNeutralInstructionCount = 0;
 
+        // Walk the bounded startup path and accept only one complete flags-save sequence.
         for (var i = 0; i < 256 && !isEpTrapFlagCheckPresent; i++) {
             var currentEpInstruction = emulateAndGetAsmInstructionByIndex(i),
                 currentEpOpCode = getAsmOpCode(currentEpInstruction);
 
             if (!currentEpOpCode) break; // Safety check
 
+            // Determine which instruction advances, preserves, or invalidates the active state.
             var poppedFlagsRegister = currentEpInstruction.match(trapFlagPopRegisterPattern),
                 testedFlagsRegister = currentEpInstruction.match(trapFlagRegisterTestPattern),
                 conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
@@ -6396,23 +6461,28 @@ function scanForObfuscations_Native() {
                     (trapFlagState === 3 && flagsNeutralRegisterWrite);
 
             if (trapFlagPushPattern.test(currentEpOpCode)) {
+                // State 1: EFLAGS/RFLAGS has been copied to the current stack top.
                 trapFlagState = 1;
                 trapFlagRegister = String();
                 trapFlagTestOpCode = String();
                 trapFlagNeutralInstructionCount = 0;
             } else if (trapFlagState === 1 && trapFlagStackSetPattern.test(currentEpInstruction)) {
+                // State 4: the saved stack value has had the Trap Flag bit toggled on.
                 trapFlagState = 4;
                 trapFlagNeutralInstructionCount = 0;
             } else if (trapFlagState === 4 && trapFlagPopPattern.test(currentEpOpCode)) {
+                // Restoring the modified flags deliberately enables single-step execution.
                 log(logType.any, "Trap flag enabled near EP: " + currentEpInstruction);
 
                 isEpTrapFlagCheckPresent = true;
             } else if (trapFlagState === 1 && poppedFlagsRegister) {
+                // State 2: preserve the complete flags value in a native-width register.
                 trapFlagRegister = poppedFlagsRegister[1].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String());
                 trapFlagState = 2;
                 trapFlagNeutralInstructionCount = 0;
             } else if (trapFlagState === 2 && testedFlagsRegister && trapFlagRegister ===
                 (testedFlagsRegister[1] || testedFlagsRegister[2]).toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())) {
+                // State 3: the same saved value is tested specifically for bit 8 / 0x100.
                 trapFlagState = 3;
                 trapFlagTestOpCode = currentEpOpCode;
                 trapFlagNeutralInstructionCount = 0;
@@ -6420,6 +6490,7 @@ function scanForObfuscations_Native() {
                 (trapFlagTestOpCode === "BT" && ["JAE", "JB", "JC", "JNAE", "JNB", "JNC"].indexOf(currentEpOpCode) !== -1) ||
                 (trapFlagTestOpCode !== "BT" && ["JE", "JNE", "JNZ", "JZ"].indexOf(currentEpOpCode) !== -1)
             )) {
+                // Accept only branch families which consume the flags produced by BT or TEST/AND.
                 log(logType.any, "Trap flag checked near EP: " + currentEpInstruction);
 
                 isEpTrapFlagCheckPresent = true;
@@ -6429,6 +6500,7 @@ function scanForObfuscations_Native() {
                 // is harmless. Afterwards only instructions that preserve EFLAGS are safe.
                 trapFlagNeutralInstructionCount++;
             } else {
+                // Any incompatible instruction breaks the sequence but permits a later restart.
                 trapFlagState = 0;
                 trapFlagRegister = String();
                 trapFlagTestOpCode = String();
@@ -6452,6 +6524,8 @@ function scanForObfuscations_Native() {
     var hasWritableExecutableSection = false;
 
     if (PE_Cached.isDynamicLinkLibrary) {
+        // DLL startup is normally compiler-generated. Admit it to this expensive pass only
+        // when writable executable memory provides a concrete self-modification prerequisite.
         for (var i = 0; i < PE_Cached.numberOfSections && !hasWritableExecutableSection; i++) {
             if ((PE.section[i].Characteristics & (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) === (SECTION_FLAGS_EXECUTE | SECTION_FLAGS_WRITE)) {
                 hasWritableExecutableSection = true;
@@ -6459,6 +6533,8 @@ function scanForObfuscations_Native() {
         }
     }
 
+    // Collect orthogonal behavioral facts during one CFG walk. Separate counters let the
+    // verdict rules below combine only the evidence relevant to their own FP threshold.
     var epNoncanonicalShiftCount = 0,
         epStackMutationCount = 0,
         epComplexStackMutationCount = 0,
@@ -6473,11 +6549,14 @@ function scanForObfuscations_Native() {
         epAdcPresent = false,
         epBitstreamIndirectTransferPresent = false;
 
+    // Count generic self-modifying call stubs per section; one loose match is insufficient.
     var epRepeatedSelfModifyingCallStubCountBySection = {};
 
     if ((!PE_Cached.isDynamicLinkLibrary || hasWritableExecutableSection) &&
         !PE_Cached.isDriver && PE_Cached.isArchX86 &&
         (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        // Global and local limits bound the reachable graph and every secondary proof.
+        // Patterns describe semantics rather than concrete registers or byte sequences.
         const
             epPolymorphismInstructionLimit = 256,
             epCallPopIpRecoveryLookaheadLimit = 16,
@@ -6521,6 +6600,8 @@ function scanForObfuscations_Native() {
                 "ADC", "SBB", "ROL", "ROR", "BT", "BTC", "BTR", "BTS", "BSWAP", "XADD"
             ];
 
+        // The FIFO starts at EP. Visited addresses prevent loops, while the two call maps
+        // retain only facts needed later by Call/Pop and self-modifying-stub validation.
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
             epPolymorphismVisitedAddresses = {},
             epPolymorphismVisitedInstructionCount = 0,
@@ -6528,6 +6609,7 @@ function scanForObfuscations_Native() {
             epDirectCallTargets = {},
             epPopRegisterByAddress = {};
 
+        // Consume one reachable address at a time until the graph or global budget is exhausted.
         while (epPolymorphismPendingAddresses.length !== 0 &&
             epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
             var epPolymorphismCurrentAddress = epPolymorphismPendingAddresses.shift(),
@@ -6535,6 +6617,7 @@ function scanForObfuscations_Native() {
                 epPolymorphismCurrentRva = epPolymorphismCurrentAddress - PE.getImageBase(),
                 epPolymorphismSectionIndex = -1;
 
+            // Skip loops and addresses which have no file-backed VA mapping.
             if (epPolymorphismVisitedAddresses[epPolymorphismAddressKey] ||
                 PE.VAToOffset(epPolymorphismCurrentAddress) === -1) continue;
 
@@ -6553,6 +6636,7 @@ function scanForObfuscations_Native() {
 
             if (epPolymorphismSectionIndex === -1) continue;
 
+            // Mark an address only after its executable physical section has been proven.
             epPolymorphismVisitedAddresses[epPolymorphismAddressKey] = true;
             epPolymorphismVisitedInstructionCount++;
 
@@ -6568,9 +6652,11 @@ function scanForObfuscations_Native() {
             var epPopGeneralPurposeRegister = epPolymorphismInstruction.match(epPopGeneralPurposeRegisterPattern);
 
             if (epPopGeneralPurposeRegister) {
+                // Record the exact native register used to recover a possible return address.
                 epPopRegisterByAddress[epPolymorphismAddressKey] = epPopGeneralPurposeRegister[1].toUpperCase();
             }
 
+            // Count the two independent primitives required by the bitstream-unpacker rule.
             if (epBitstreamAdcPattern.test(epPolymorphismInstruction)) epBitstreamAdcCount++;
 
             if (/^REP MOVSB(?: |$)/i.test(epPolymorphismInstruction)) epBitstreamMovsbCount++;
@@ -6581,6 +6667,7 @@ function scanForObfuscations_Native() {
                 var epShiftDestination = epShiftRotate[1],
                     epShiftOperandWidth = 0;
 
+                // Resolve operand width from either an explicit memory size or register class.
                 if (/^BYTE PTR /i.test(epShiftDestination) || epByteRegisterPattern.test(epShiftDestination)) {
                     epShiftOperandWidth = 8;
                 } else if (/^WORD PTR /i.test(epShiftDestination) || epWordRegisterPattern.test(epShiftDestination)) {
@@ -6602,6 +6689,7 @@ function scanForObfuscations_Native() {
             var epStackMutation = epPolymorphismInstruction.match(epStackMutationPattern);
 
             if (epStackMutation) {
+                // Count all arithmetic writes through SP and separately count uncommon transforms.
                 epStackMutationCount++;
 
                 if (epComplexStackMutationOpCodes.indexOf(epStackMutation[1].toUpperCase()) !== -1) {
@@ -6609,6 +6697,7 @@ function scanForObfuscations_Native() {
                 }
             }
 
+            // Flag-transfer and bit-operation facts jointly describe a dense bit mixer.
             if (/^(?:PUSHF|PUSHFD|PUSHFQ|POPF|POPFD|POPFQ|LAHF|SAHF)$/.test(epPolymorphismOpCode)) {
                 epFlagsTransferPresent = true;
             }
@@ -6626,6 +6715,7 @@ function scanForObfuscations_Native() {
             var epPolymorphismNextAddress = epPolymorphismCurrentAddress + epPolymorphismInstructionLength,
                 epPolymorphismDirectControlFlow = epPolymorphismInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
 
+            // An unresolved Call/Jmp supplies the final dispatcher fact for bitstream unpacking.
             if (!epPolymorphismDirectControlFlow &&
                 (epPolymorphismOpCode === "CALL" || epPolymorphismOpCode === "JMP" || epPolymorphismOpCode === "JMPF")) {
                 epBitstreamIndirectTransferPresent = true;
@@ -6637,12 +6727,15 @@ function scanForObfuscations_Native() {
                 if (epPolymorphismOpCode === "CALL") {
                     var epPolymorphismTargetKey = epPolymorphismTargetAddress.toString();
 
+                    // Preserve every reachable direct call target for secondary validation.
                     epDirectCallTargets[epPolymorphismTargetKey] = true;
                 }
 
                 if (epPolymorphismOpCode === "JMP" || epPolymorphismOpCode === "JMPF") {
+                    // An unconditional jump has no reachable physical fall-through.
                     epPolymorphismPendingAddresses.push(epPolymorphismTargetAddress);
                 } else {
+                    // Calls and conditional branches retain both target and fall-through paths.
                     epPolymorphismPendingAddresses.push(epPolymorphismTargetAddress);
                     epPolymorphismPendingAddresses.push(epPolymorphismNextAddress);
                 }
@@ -6656,6 +6749,7 @@ function scanForObfuscations_Native() {
 
         // Reuse the reachable direct-call set for two independent behavioral proofs.
         for (var epDirectCallTargetKey in epDirectCallTargets) {
+            // Object keys are decimal address strings; restore the numeric VA once per target.
             var epDirectCallTargetAddress = parseInt(epDirectCallTargetKey, 10);
 
             if (epSelfModifyingCallStubAddress === -1) {
@@ -6679,6 +6773,7 @@ function scanForObfuscations_Native() {
                 }
 
                 if (epSelfModifyingCallStubSectionIndex !== -1) {
+                    // The strict profile advances through seven ordered semantic stages.
                     var epSelfModifyingCallStubCurrentAddress = epDirectCallTargetAddress,
                         epSelfModifyingCallStubState = 0,
                         epSelfModifyingCallStubNeutralInstructionCount = 0,
@@ -6709,21 +6804,28 @@ function scanForObfuscations_Native() {
                         if (!epSelfModifyingCallStubOpCode || epSelfModifyingCallStubInstructionLength <= 0) break;
 
                         if (epSelfModifyingCallStubState === 0) {
+                            // Stage 0 consumes the call return address into writable memory.
                             epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubReturnStorePattern.test(epSelfModifyingCallStubInstruction);
                         } else if (epSelfModifyingCallStubState === 1) {
+                            // Stage 1 preserves the native accumulator before using EAX as a decoder.
                             epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubAccumulatorPushPattern.test(epSelfModifyingCallStubInstruction);
                         } else if (epSelfModifyingCallStubState === 2) {
+                            // Stage 2 materializes a DWORD key or encoded instruction value.
                             epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubKeyLoadPattern.test(epSelfModifyingCallStubInstruction);
                         } else if (epSelfModifyingCallStubState === 3) {
+                            // Stage 3 transforms that DWORD without requiring one concrete key.
                             epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubDecodePattern.test(epSelfModifyingCallStubInstruction);
                         } else if (epSelfModifyingCallStubState === 4) {
+                            // Stage 4 atomically exchanges the decoded DWORD with executable bytes.
                             epSelfModifyingCallStubWrite = epSelfModifyingCallStubInstruction.match(epSelfModifyingCallStubWritePattern);
                             epSelfModifyingCallStubStageMatched = Boolean(epSelfModifyingCallStubWrite);
 
                             if (epSelfModifyingCallStubWrite) {
                                 if (epSelfModifyingCallStubWrite[3]) {
+                                    // The disassembler may print a direct absolute write target.
                                     epSelfModifyingCallStubWriteAddress = parseInt(epSelfModifyingCallStubWrite[3], 0);
                                 } else {
+                                    // Resolve a RIP-relative displacement against the following instruction.
                                     var epSelfModifyingCallStubDisplacement = parseInt(epSelfModifyingCallStubWrite[2], 0);
 
                                     if (epSelfModifyingCallStubWrite[1] === "-") epSelfModifyingCallStubDisplacement = -epSelfModifyingCallStubDisplacement;
@@ -6733,6 +6835,7 @@ function scanForObfuscations_Native() {
                                 }
                             }
                         } else if (epSelfModifyingCallStubState === 5) {
+                            // Stage 5 restores the accumulator saved before reconstruction.
                             epSelfModifyingCallStubStageMatched = epSelfModifyingCallStubAccumulatorPopPattern.test(epSelfModifyingCallStubInstruction);
                         } else if (epSelfModifyingCallStubState === 6) {
                             // The bundled disassembler may canonicalize F3 90 to Nop even
@@ -6742,26 +6845,32 @@ function scanForObfuscations_Native() {
                         }
 
                         if (epSelfModifyingCallStubStageMatched) {
+                            // Advance exactly one stage and restart its local padding allowance.
                             epSelfModifyingCallStubState++;
                             epSelfModifyingCallStubNeutralInstructionCount = 0;
 
                             if (epSelfModifyingCallStubState === 7 &&
                                 epSelfModifyingCallStubWriteAddress === epSelfModifyingCallStubCurrentAddress + epSelfModifyingCallStubInstructionLength) {
+                                // The rewritten DWORD must begin immediately after the serializing Pause.
                                 epSelfModifyingCallStubAddress = epDirectCallTargetAddress;
                             }
                         } else if ((epSelfModifyingCallStubOpCode === "NOP" || epSelfModifyingCallStubOpCode === "FNOP" ||
                             epSimplePolymorphicInstructionPattern.test(epSelfModifyingCallStubInstruction) ||
                             epValuePreservingInstructionPattern.test(epSelfModifyingCallStubInstruction)) &&
                             epSelfModifyingCallStubNeutralInstructionCount < epSelfModifyingCallStubNeutralInstructionLimit) {
+                            // Permit a small amount of neutral polymorphism independently per stage.
                             epSelfModifyingCallStubNeutralInstructionCount++;
                         } else {
+                            // Any semantic mismatch rejects this strict stub candidate.
                             break;
                         }
 
+                        // Strict-profile matching is physical and linear within one section.
                         epSelfModifyingCallStubCurrentAddress += epSelfModifyingCallStubInstructionLength;
                     }
 
                     if (epSelfModifyingCallStubAddress === -1) {
+                        // Fall back to a looser profile only when the exact seven-stage form failed.
                         var epRepeatedSelfModifyingCallStubCurrentAddress = epDirectCallTargetAddress,
                             epRepeatedSelfModifyingCallStubReturnReadPresent = false,
                             epRepeatedSelfModifyingCallStubTransformPresent = false,
@@ -6790,8 +6899,10 @@ function scanForObfuscations_Native() {
                                 epRepeatedSelfModifyingCallStubInstructionLength <= 0) break;
 
                             if (!epRepeatedSelfModifyingCallStubReturnReadPresent) {
+                                // First prove that the called stub obtains its own return address.
                                 epRepeatedSelfModifyingCallStubReturnReadPresent = epRepeatedSelfModifyingCallStubReturnReadPattern.test(epRepeatedSelfModifyingCallStubInstruction);
                             } else if (!epRepeatedSelfModifyingCallStubTransformPresent) {
+                                // Then bind the first following arithmetic transform to its destination.
                                 var epRepeatedSelfModifyingCallStubTransform = epRepeatedSelfModifyingCallStubInstruction.match(epRepeatedSelfModifyingCallStubTransformPattern);
 
                                 if (epRepeatedSelfModifyingCallStubTransform) {
@@ -6802,10 +6913,12 @@ function scanForObfuscations_Native() {
 
                             if (epRepeatedSelfModifyingCallStubReturnReadPresent &&
                                 epRepeatedSelfModifyingCallStubTransformPresent) {
+                                // A write is eligible only after both earlier semantic stages exist.
                                 epRepeatedSelfModifyingCallStubWrite = epRepeatedSelfModifyingCallStubInstruction.match(epRepeatedSelfModifyingCallStubWritePattern);
 
                                 if (epRepeatedSelfModifyingCallStubWrite &&
                                     epRepeatedSelfModifyingCallStubWrite[4].toUpperCase() !== epRepeatedSelfModifyingCallStubTransformRegister) {
+                                    // Reject a write sourced from a value unrelated to the transform.
                                     break;
                                 }
                             }
@@ -6814,8 +6927,10 @@ function scanForObfuscations_Native() {
                                 var epRepeatedSelfModifyingCallStubWriteAddress;
 
                                 if (epRepeatedSelfModifyingCallStubWrite[3]) {
+                                    // Preserve an absolute write target exactly as decoded.
                                     epRepeatedSelfModifyingCallStubWriteAddress = parseInt(epRepeatedSelfModifyingCallStubWrite[3], 0);
                                 } else {
+                                    // Convert RIP-relative syntax into the effective write VA.
                                     var epRepeatedSelfModifyingCallStubDisplacement = parseInt(epRepeatedSelfModifyingCallStubWrite[2], 0);
 
                                     if (epRepeatedSelfModifyingCallStubWrite[1] === "-") {
@@ -6828,12 +6943,15 @@ function scanForObfuscations_Native() {
 
                                 var epRepeatedSelfModifyingCallStubSectionAddress = PE.getImageBase() + epSelfModifyingCallStubSectionRva;
 
+                                // Require the write to remain inside the same executable/writable
+                                // section and close enough to reconstruct the current stub.
                                 if (epRepeatedSelfModifyingCallStubWriteAddress >= epRepeatedSelfModifyingCallStubSectionAddress &&
                                     epRepeatedSelfModifyingCallStubWriteAddress < epRepeatedSelfModifyingCallStubSectionAddress + epSelfModifyingCallStubSectionRawSize &&
                                     Math.abs(epRepeatedSelfModifyingCallStubWriteAddress - epDirectCallTargetAddress) <=
                                     epRepeatedSelfModifyingCallStubMaximumWriteDistance) {
                                     var epRepeatedSelfModifyingCallStubSectionKey = epSelfModifyingCallStubSectionIndex.toString();
 
+                                    // Initialize and increment the section-local evidence count.
                                     if (!epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey]) {
                                         epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey] = 0;
                                     }
@@ -6842,6 +6960,7 @@ function scanForObfuscations_Native() {
 
                                     if (epRepeatedSelfModifyingCallStubCountBySection[epRepeatedSelfModifyingCallStubSectionKey] >=
                                         epRepeatedSelfModifyingCallStubRequiredCount) {
+                                        // Three independent stubs compensate for the generic profile's freedom.
                                         epSelfModifyingCallStubAddress = epDirectCallTargetAddress;
                                     }
                                 }
@@ -6849,8 +6968,10 @@ function scanForObfuscations_Native() {
                                 break;
                             }
 
+                            // Never join instructions across a terminal control-flow boundary.
                             if (epScanStopOpCodes.indexOf(epRepeatedSelfModifyingCallStubOpCode) !== -1) break;
 
+                            // Continue linearly inside the already validated writable code section.
                             epRepeatedSelfModifyingCallStubCurrentAddress += epRepeatedSelfModifyingCallStubInstructionLength;
                         }
                     }
@@ -6862,6 +6983,7 @@ function scanForObfuscations_Native() {
             // is read before it can be overwritten or invalidated by another control transfer.
             var epIpRecoveryRegister = epPopRegisterByAddress[epDirectCallTargetKey];
 
+            // Only targets beginning with Pop can carry a Call/Pop instruction-pointer proof.
             if (!epIpRecoveryRegister) continue;
 
             var epIpRecoveryCurrentAddress = parseInt(epDirectCallTargetKey, 10),
@@ -6886,10 +7008,13 @@ function scanForObfuscations_Native() {
 
             var epIpRecoveryRegisterAliasMentionPattern = new RegExp("\\b" + epIpRecoveryRegisterAlias + "\\b", "i");
 
+            // Reject malformed POP decoding before moving to its first consumer.
             if (epIpRecoveryPopLength <= 0) continue;
 
             epIpRecoveryCurrentAddress += epIpRecoveryPopLength;
 
+            // Inspect a short physical window after Pop; long-distance use would be too
+            // easy to confuse with ordinary register data flow and would increase FP.
             for (var epIpRecoveryIndex = 0; epIpRecoveryIndex < epCallPopIpRecoveryLookaheadLimit; epIpRecoveryIndex++) {
                 var epIpRecoveryCurrentRva = epIpRecoveryCurrentAddress - PE.getImageBase(),
                     epIpRecoverySectionIndex = -1;
@@ -6919,10 +7044,12 @@ function scanForObfuscations_Native() {
 
                 if (!epIpRecoveryOpCode || epIpRecoveryInstructionLength <= 0) break;
 
+                // Any partial-register access changes or observes only part of the recovered VA.
                 if (epIpRecoveryRegisterAliasMentioned && !epIpRecoveryRegisterMentioned) break;
 
                 if (epIpRecoveryRegisterMentioned &&
                     !epIpRecoverySimplePolymorphism && !epIpRecoveryValuePreserving) {
+                    // Accept the first meaningful full-width read unless it first clears the value.
                     if (!epIpRecoveryRegisterClearPattern.test(epIpRecoveryInstruction) &&
                         epIpRecoveryRegisterReadPattern.test(epIpRecoveryInstruction)) {
                         epCallPopIpRecoveryAddress = parseInt(epDirectCallTargetKey, 10);
@@ -6941,8 +7068,10 @@ function scanForObfuscations_Native() {
                         epIpRecoverySimplePolymorphism || epIpRecoveryValuePreserving ||
                         epIpRecoveryRegisterWrite || /^(?:CMP|TEST)$/.test(epIpRecoveryOpCode);
 
+                // Stop when the instruction cannot safely preserve a pending recovered pointer.
                 if (!epIpRecoveryNeutralInstruction || epScanStopOpCodes.indexOf(epIpRecoveryOpCode) !== -1) break;
 
+                // Advance only after the current instruction has preserved the pending proof.
                 epIpRecoveryCurrentAddress += epIpRecoveryInstructionLength;
             }
 
@@ -6965,6 +7094,7 @@ function scanForObfuscations_Native() {
     var isCallPopEpIpRecoveryPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && epCallPopIpRecoveryAddress !== -1) {
+        // The shared pass already validated both the Pop target and later pointer use.
         log(logType.any, "Call/Pop IP recovery near EP");
 
         isCallPopEpIpRecoveryPresent = true;
@@ -6980,6 +7110,7 @@ function scanForObfuscations_Native() {
     var isSelfModifyingEpCallStubPresent = false;
 
     if (epSelfModifyingCallStubAddress !== -1) {
+        // Either one strict stub or three generic section-local stubs proved reconstruction.
         log(logType.any, "Self-modifying call stub near EP: 0x" + epSelfModifyingCallStubAddress.toString(16));
 
         isSelfModifyingEpCallStubPresent = true;
@@ -6998,6 +7129,7 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary &&
         epBitstreamAdcCount >= 8 && epBitstreamMovsbCount >= 2 && epBitstreamIndirectTransferPresent) {
+        // Require all three independent components before reporting the compound behavior.
         log(logType.any, "Bitstream unpacker near EP: Adc: " + epBitstreamAdcCount + ", Rep Movsb: " + epBitstreamMovsbCount);
 
         isBitstreamEpUnpackerPresent = true;
@@ -7013,6 +7145,7 @@ function scanForObfuscations_Native() {
     var isNoncanonicalEpShiftPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && epNoncanonicalShiftCount >= 5) {
+        // Five encodings establish a generator habit rather than one hand-written oddity.
         log(logType.any, "Noncanonical shifts near EP: " + epNoncanonicalShiftCount);
 
         isNoncanonicalEpShiftPresent = true;
@@ -7028,6 +7161,7 @@ function scanForObfuscations_Native() {
     var isComplexEpStackMutationPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && epStackMutationCount >= 4 && epComplexStackMutationCount !== 0) {
+        // Density supplies repetition; the uncommon transform supplies specificity.
         log(logType.any, "Stack mutations near EP: " + epStackMutationCount + " (complex: " + epComplexStackMutationCount + ")");
 
         isComplexEpStackMutationPresent = true;
@@ -7046,6 +7180,7 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary &&
         epFlagsTransferPresent && epRolPresent && epRorPresent && epAdcPresent && epRareBitOpCount >= 5) {
+        // Every mandatory family must be reachable; isolated arithmetic is insufficient.
         log(logType.any, "Mixed bit-operation families near EP: " + epRareBitOpCount);
 
         isMixedEpBitOpsPresent = true;
@@ -7332,6 +7467,7 @@ function scanForObfuscations_Native() {
         var physicalCodeSize = 0,
             physicalCodeSectionCount = 0;
 
+        // Reconstruct the physical code total from non-empty sections explicitly marked as code.
         for (var i = 0; i < PE_Cached.numberOfSections; i++) {
             if ((PE.section[i].Characteristics & SECTION_FLAGS_CODE) &&
                 PE.getSectionFileSize(i) !== 0) {
@@ -7345,6 +7481,7 @@ function scanForObfuscations_Native() {
             PE.getImageOptionalHeader("FileAlignment") * physicalCodeSectionCount
         );
 
+        // Report only the excess beyond both the PE header value and alignment tolerance.
         if (physicalCodeSize > PE.getSizeOfCode() + codeSizeAlignmentTolerance) {
             isUnderreportedCodePresent = true;
             isSeverelyUnderreportedCodePresent = physicalCodeSize > PE.getSizeOfCode() * 2;
@@ -7355,6 +7492,8 @@ function scanForObfuscations_Native() {
 
     if (isUnderreportedCodePresent && PE_Cached.numberOfSections > 1 &&
         entryPointSectionIndex !== -1 && PE.isEntryPointCorrect()) {
+        // Treat the final section as a startup-code candidate only after the global
+        // SizeOfCode mismatch has independently established underreported physical code.
         const
             protectedStartupSectionIndex = PE_Cached.numberOfSections - 1,
             protectedStartupSection = PE.section[protectedStartupSectionIndex],
@@ -7367,13 +7506,17 @@ function scanForObfuscations_Native() {
                 protectedStartupSectionFileSize
             );
 
+        // Require a substantial, high-entropy, readable executable code section. Excluding
+        // writable sections avoids conflating this rule with self-modifying startup code.
         if (protectedStartupSectionFileSize >= 0x1000 &&
             (protectedStartupSectionCharacteristics & protectedStartupSectionRequiredFlags) === protectedStartupSectionRequiredFlags &&
             !(protectedStartupSectionCharacteristics & SECTION_FLAGS_WRITE) &&
             PE.calculateEntropy(PE.getSectionFileOffset(protectedStartupSectionIndex), protectedStartupSectionFileSize) > 6.6) {
             if (entryPointSectionIndex === protectedStartupSectionIndex) {
+                // EP residing directly in the candidate section is a complete startup proof.
                 isUnderreportedStartupCodePresent = true;
             } else if (PE_Cached.isArchX86) {
+                // Otherwise prove that reachable EP control flow enters the candidate section.
                 var protectedStartupPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
                     protectedStartupVisitedAddresses = {},
                     protectedStartupVisitedInstructionCount = 0;
@@ -7385,12 +7528,15 @@ function scanForObfuscations_Native() {
                 while (protectedStartupPendingAddresses.length !== 0 &&
                     protectedStartupVisitedInstructionCount < 256 &&
                     !isUnderreportedStartupCodePresent) {
+                    // Process one queued address and canonicalize it for loop detection.
                     var protectedStartupCurrentAddress = protectedStartupPendingAddresses.shift(),
                         protectedStartupAddressKey = protectedStartupCurrentAddress.toString();
 
+                    // Discard repeated and unmapped nodes before spending the instruction budget.
                     if (protectedStartupVisitedAddresses[protectedStartupAddressKey] ||
                         PE.VAToOffset(protectedStartupCurrentAddress) === -1) continue;
 
+                    // Count each mapped address once, even when several branches converge on it.
                     protectedStartupVisitedAddresses[protectedStartupAddressKey] = true;
                     protectedStartupVisitedInstructionCount++;
 
@@ -7404,17 +7550,21 @@ function scanForObfuscations_Native() {
                         protectedStartupDirectControlFlow = protectedStartupInstruction.match(/^(CALL|J[A-Z]+|LOOP(?:E|NE|NZ|Z)?) (0X[0-9A-F]+|\d+)$/i);
 
                     if (protectedStartupDirectControlFlow) {
+                        // Resolve direct control flow before deciding which successors remain reachable.
                         var protectedStartupTargetAddress = parseInt(protectedStartupDirectControlFlow[2], 0);
 
                         if (protectedStartupTargetAddress >= protectedStartupSectionStartAddress &&
                             protectedStartupTargetAddress < protectedStartupSectionEndAddress &&
                             PE.VAToOffset(protectedStartupTargetAddress) !== -1) {
+                            // A physically backed target inside the candidate section completes the proof.
                             isUnderreportedStartupCodePresent = true;
 
                             log(logType.any, "EP control flow reaches underreported section #" + protectedStartupSectionIndex + " at 0x" + protectedStartupTargetAddress.toString(16));
                         } else if (protectedStartupOpCode === "JMP" || protectedStartupOpCode === "JMPF") {
+                            // Unconditional jumps retain only their explicit destination.
                             protectedStartupPendingAddresses.push(protectedStartupTargetAddress);
                         } else {
+                            // Calls and conditional branches may continue along both edges.
                             protectedStartupPendingAddresses.push(protectedStartupTargetAddress);
                             protectedStartupPendingAddresses.push(protectedStartupNextAddress);
                         }
@@ -7422,6 +7572,7 @@ function scanForObfuscations_Native() {
                         // An unresolved indirect call may return, so its fall-through stays reachable.
                         protectedStartupPendingAddresses.push(protectedStartupNextAddress);
                     } else if (epScanStopOpCodes.indexOf(protectedStartupOpCode) === -1) {
+                        // Ordinary instructions advance linearly; terminal opcodes add no successor.
                         protectedStartupPendingAddresses.push(protectedStartupNextAddress);
                     }
                 }
