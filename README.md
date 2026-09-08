@@ -26,17 +26,17 @@ Detect It Easy’s **flexible signature system** and **scripting capabilities** 
 
 -   **Flexible Signature Management**: Easily create, modify, and optimize detection scripts (rules).
 -   **Cross-Platform Support**: Runs on Windows, Linux, and MacOS.
--   **Minimal False Positives**: Combined signature and heuristic analysis ensures high detection accuracy.
+-   **Conservative Heuristics**: Independent evidence, architecture gates, bounded scans, and explicit antipatterns help control false positives.
 
 ## 🧠 Heuristic engine
 
 ### PE analysis that goes beyond a signature match
 
-A signature can tell you what a file resembles. The [Generic Heuristic Analysis engine](db/PE/__GenericHeuristicAnalysis_By_DosX.7.sg) goes further: it tries to explain what is unusual about the file and why it deserves a closer look. The PE heuristic engine is created and maintained by [DosX](https://github.com/DosX-dev).
+A signature can tell you what a file resembles. The [Generic Heuristic Analysis engine](db/PE/__GenericHeuristicAnalysis_By_DosX.7.sg) goes further: it reports concrete structural and behavioral anomalies together with the evidence behind them. The PE heuristic engine is created and maintained by [DosX](https://github.com/DosX-dev).
 
-With heuristic scanning enabled, DiE makes a series of specialized passes over native and managed PE images. The file is never launched. Instead, the engine works with headers, data directories, sections, imports, exports, resources, .NET metadata, bytecode, overlays, debug records, and code around the entry point. This makes it useful both when an exact signature is known and when a sample has been modified enough to evade ordinary identification.
+With heuristic scanning enabled, DiE makes a series of specialized passes over native and managed PE images. The file is never launched. Instead, the engine works with headers, data directories, sections, imports, exports, resources, .NET metadata, bytecode, overlays, debug records, and reachable startup code rooted at the entry point. This makes it useful both when an exact signature is known and when a sample has been modified enough to evade ordinary identification.
 
-One of these passes performs **surface-level emulation of native instructions around the entry point**. It is deliberately lightweight rather than a sandbox or full CPU emulator, but it is enough to expose unusual instruction sequences, proxy jumps, stack tricks, NOP padding, hidden TLS entry points, self-modifying stubs, and polymorphic obfuscation used by packers and protectors. These checks are designed to remain effective when successive builds vary registers, instruction ordering, neutral padding, and equivalent arithmetic forms—the same surface changes commonly produced by commercial polymorphic generators and private cryptors.
+Native analysis combines cached linear disassembly with bounded traversal of reachable startup code and purpose-built state machines. It tracks the register, flag, stack, address-provenance, and instruction-boundary facts required by each rule without pretending to be a sandbox or full CPU emulator. This allows DiE to expose opaque and degenerate branches, synthetic and indirect transfers, overlapping instruction streams, position-independent and self-modifying stubs, bitstream unpackers, anti-analysis probes, and irregular control flow used by polymorphic packers and protectors. The checks remain effective across register substitution, neutral padding, equivalent arithmetic forms, and bounded reordering of independent instructions commonly produced by commercial generators and private cryptors.
 
 Managed code receives instruction-aware treatment of its own. An internal MSIL opcode model is used to build operand-aware bytecode patterns for indirect calls and function pointers, control-flow transformations, arithmetic mutations, invalid instruction sequences, and other forms of obfuscation. It is not a CLR emulator, but it allows the engine to reason about executable IL patterns instead of treating a managed assembly as little more than metadata and strings.
 
@@ -102,7 +102,7 @@ These are the main passes rather than a complete inventory of every check:
     -   AutoCAD, Total Commander, 3ds Max, Microsoft Excel, Borland/Delphi, CPython, Node.js, MATLAB, and other ecosystems deliberately use PE modules with specialized extensions.
     -   DiE names known roles directly—for example, `.bpl` as **Borland Package**, `.xll` as **Microsoft Excel Add-In**, `.arx` as **AutoCAD ObjectARX Module**, or `.wcx` as **Total Commander Packer Plug-In**—while missing, custom, or misleading extensions, application images carrying a `.dll` suffix, and DLL images presented as `.exe` files are reported separately.
 
-This is not a black-box malware score. DiE produces a practical evidence map for triage: what probably built the file, whether the image looks original, damaged, dumped, or reconstructed, which protection or DRM may explain its structure, and which artifacts deserve attention next. A heuristic result is a lead, not automatic proof of malicious intent. Use `--heuristicscan` together with `--verbose` to see the fullest report.
+This is not a black-box malware score. DiE produces a practical evidence map for triage: what probably built the file, whether the image looks original, damaged, dumped, or reconstructed, which protection or DRM may explain its structure, and which artifacts deserve attention next. A heuristic result is a lead, not automatic proof of malicious intent. Verbose scan messages label instruction-derived evidence as `[HEUR/EMU]`, making it explicit which findings were established through emulation. Use `--heuristicscan` together with `--verbose` to see the fullest report.
 
 ### Malware clues without pretending to be an antivirus
 
