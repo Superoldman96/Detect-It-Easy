@@ -97,11 +97,12 @@
 const
     PE_Cached = {}, // PE-related cache-map
     logType = {
-        warning: -2, // Service warnings
-        about: -1,   // Information about a module
-        nothing: 0,  // General information about the scanning process
-        any: 1,      // Native and .NET
-        net: 2       // .NET only
+        warning: -2,  // Service warnings
+        about: -1,    // Information about a module
+        nothing: 0,   // General information about the scanning process
+        any: 1,       // Native and .NET
+        net: 2,       // .NET only
+        emulation: 3  // Instruction emulation
     },
     heurLabel = "HEUR";
 
@@ -469,7 +470,7 @@ function scanForObfuscations_NET() {
 
             if (firstOpCode !== "JMP") {
                 if (PE.VAToOffset(PE_Cached.addressOfUnmanagedEntryPoint) !== -1) {
-                    log(logType.net, "Very strange EP pattern: " + emulateAndGetEpAsmPattern(true, 4).split("|").join(" .. "));
+                    log(logType.emulation, "Very strange EP pattern: " + emulateAndGetEpAsmPattern(true, 4).split("|").join(" .. "));
                 } else {
                     log(logType.net, "No native entry point");
                 }
@@ -1713,13 +1714,13 @@ function scanForAntiAnalysis_Native() {
 
             if (currentEpOpCode === "MOV" && antiDebugRegisterAccessPattern.test(currentEpInstruction)) {
                 // Any explicit MOV involving DR0-DR7 is already a complete register-based proof.
-                log(logType.any, "Debug-register access near EP: " + currentEpInstruction);
+                log(logType.emulation, "Debug-register access near EP: " + currentEpInstruction);
 
                 nativeAntiDebugType = "REG";
                 isNativeAntiDebugPresent = true;
             } else if (isPebDebugFieldAccess) {
                 // Accept a debug-field read only through a register proven to contain the PEB.
-                log(logType.any, "PEB debug-field access near EP: " + currentEpInstruction);
+                log(logType.emulation, "PEB debug-field access near EP: " + currentEpInstruction);
 
                 nativeAntiDebugType = "PEB";
                 isNativeAntiDebugPresent = true;
@@ -5116,7 +5117,7 @@ function scanForObfuscations_Native() {
 
                     // Two adjacent internal NOPs or three interspersed NOPs are unlikely compiler output.
                     if (maxInternalNopRun >= 2 || internalNopCount >= 3) {
-                        log(logType.any, "Internal NOP padding near EP: " + internalNopCount + " instruction(s)");
+                        log(logType.emulation, "Internal NOP padding near EP: " + internalNopCount + " instruction(s)");
 
                         isNopPaddingPresent = true;
                     }
@@ -5165,7 +5166,7 @@ function scanForObfuscations_Native() {
 
                     // Check if machine code matches E8 00 00 00 00 pattern
                     if (currentOffset !== -1 && PE.compare("E8 00 00 00 00", currentOffset)) {
-                        log(logType.any, "Stack-push address near EP found at offset: 0x" + currentOffset.toString(16));
+                        log(logType.emulation, "Stack-push address near EP found at offset: 0x" + currentOffset.toString(16));
 
                         isAddrToStackTrickPresent = true;
                     }
@@ -5366,7 +5367,7 @@ function scanForObfuscations_Native() {
                 syntheticEpNeutralInstructionCount = 0;
             } else if (/^RET(?:N)?$/.test(currentEpOpCode) && syntheticEpTargetAddress) {
                 // RET at a process entry point is meaningful here only as a concealed transfer.
-                log(logType.any, "Synthetic " + syntheticEpTargetType + "/ret transfer near EP to 0x" + parseInt(syntheticEpTargetAddress, 0).toString(16));
+                log(logType.emulation, "Synthetic " + syntheticEpTargetType + "/ret transfer near EP to 0x" + parseInt(syntheticEpTargetAddress, 0).toString(16));
 
                 isSyntheticEpTransferPresent = true;
             } else if (isNeutralInstruction && syntheticEpNeutralInstructionCount < epNeutralInstructionLimit) {
@@ -5550,7 +5551,7 @@ function scanForObfuscations_Native() {
                     opaqueEpNeverTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1)) {
                 var opaqueEpBranchType = opaqueEpAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ? "always taken" : "never taken";
 
-                log(logType.any, "Opaque " + opaqueEpBranchType + " branch near EP: " + opaqueEpOriginInstruction + "; " + currentEpInstruction);
+                log(logType.emulation, "Opaque " + opaqueEpBranchType + " branch near EP: " + opaqueEpOriginInstruction + "; " + currentEpInstruction);
 
                 isOpaqueEpBranchPresent = true;
             } else if (conditionalBranch) {
@@ -5606,7 +5607,7 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode) break; // Safety check
 
             if (epRedundantSelfMovePattern.test(currentEpInstruction)) {
-                log(logType.any, "Redundant register self-move near EP: " + currentEpInstruction);
+                log(logType.emulation, "Redundant register self-move near EP: " + currentEpInstruction);
 
                 isRedundantEpRegisterSelfMovePresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 || /^J[A-Z]*$/.test(currentEpOpCode)) {
@@ -5662,7 +5663,7 @@ function scanForObfuscations_Native() {
                 if (currentBranchTarget === fallThroughEpInstructionAddress ||
                     (currentBranchTarget === degenerateEpBranchTarget && PE.VAToOffset(currentBranchTarget) !== -1 &&
                         (epComplementaryBranchPairs.indexOf(branchPair) !== -1 || epComplementaryBranchPairs.indexOf(reverseBranchPair) !== -1))) {
-                    log(logType.any, "Degenerate conditional branch near EP: " + currentEpInstruction);
+                    log(logType.emulation, "Degenerate conditional branch near EP: " + currentEpInstruction);
 
                     isDegenerateEpConditionalBranchPresent = true;
                 } else {
@@ -5673,7 +5674,7 @@ function scanForObfuscations_Native() {
             } else if (directJump) {
                 if (degenerateEpBranchOpCode && degenerateEpBranchTarget === parseInt(directJump[1], 0) &&
                     PE.VAToOffset(degenerateEpBranchTarget) !== -1) {
-                    log(logType.any, "Degenerate conditional branch near EP: " + currentEpInstruction);
+                    log(logType.emulation, "Degenerate conditional branch near EP: " + currentEpInstruction);
 
                     isDegenerateEpConditionalBranchPresent = true;
                 }
@@ -5727,7 +5728,7 @@ function scanForObfuscations_Native() {
                 redundantEpPushedRegister = pushedRegister[1].toUpperCase();
                 redundantEpStackNeutralInstructionCount = 0;
             } else if (poppedRegister && redundantEpPushedRegister === poppedRegister[1].toUpperCase()) {
-                log(logType.any, "Redundant stack round-trip near EP: PUSH/POP " + redundantEpPushedRegister);
+                log(logType.emulation, "Redundant stack round-trip near EP: PUSH/POP " + redundantEpPushedRegister);
 
                 isRedundantEpStackRoundTripPresent = true;
             } else if (isSimplePolymorphicInstruction && redundantEpPushedRegister &&
@@ -5797,7 +5798,7 @@ function scanForObfuscations_Native() {
                             (reversibleEpOpCode === "SUB" && currentReversibleOpCode === "ADD"));
 
                 if (isInverseBinaryPair) {
-                    log(logType.any, "Reversible junk pair near EP: " + reversibleEpOpCode + "/" + currentReversibleOpCode + " " + currentReversibleRegister);
+                    log(logType.emulation, "Reversible junk pair near EP: " + reversibleEpOpCode + "/" + currentReversibleOpCode + " " + currentReversibleRegister);
 
                     isReversibleEpJunkPairPresent = true;
                 } else {
@@ -5812,7 +5813,7 @@ function scanForObfuscations_Native() {
 
                 if (!(PE_Cached.is64bit && epRegister32BitPattern.test(currentReversibleRegister)) &&
                     reversibleEpOpCode === currentReversibleOpCode && reversibleEpRegister === currentReversibleRegister) {
-                    log(logType.any, "Reversible junk pair near EP: " + currentReversibleOpCode + " " + currentReversibleRegister);
+                    log(logType.emulation, "Reversible junk pair near EP: " + currentReversibleOpCode + " " + currentReversibleRegister);
 
                     isReversibleEpJunkPairPresent = true;
                 } else {
@@ -5894,7 +5895,7 @@ function scanForObfuscations_Native() {
                 if (constantEpComparisonOrigin && PE.VAToOffset(parseInt(conditionalBranch[2], 0)) !== -1 &&
                     (epZeroFlagsAlwaysTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1 ||
                         epZeroFlagsNeverTakenBranches.indexOf(conditionalBranch[1].toUpperCase()) !== -1)) {
-                    log(logType.any, "Constant opaque comparison near EP: " + constantEpComparisonOrigin + "; " + currentEpInstruction);
+                    log(logType.emulation, "Constant opaque comparison near EP: " + constantEpComparisonOrigin + "; " + currentEpInstruction);
 
                     isConstantOpaqueEpComparisonPresent = true;
                 }
@@ -6023,7 +6024,7 @@ function scanForObfuscations_Native() {
                 pebModuleWalkRegisterStates[pebRegister] = 1;
             } else if (moduleListLoad && pebModuleWalkRegisterStates[moduleListLoad[2].toUpperCase().replace(epRegister32BitPrefixPattern, "R").replace(epRegister32BitSuffixPattern, String())] === 2) {
                 // Reading a loader list through a proven Ldr pointer completes the proof.
-                log(logType.any, "PEB loader module-list walk near EP: " + currentEpInstruction);
+                log(logType.emulation, "PEB loader module-list walk near EP: " + currentEpInstruction);
 
                 isPebModuleWalkPresent = true;
             } else if (ldrPointerLoad) {
@@ -6133,7 +6134,7 @@ function scanForObfuscations_Native() {
                 fpuEpNeutralInstructionCount = 0;
             } else if (popsNativeRegister && isFpuEnvironmentStored) {
                 // A native-width POP consumes the saved EIP and completes the recovery idiom.
-                log(logType.any, "FPU EIP recovery near EP: " + currentEpInstruction);
+                log(logType.emulation, "FPU EIP recovery near EP: " + currentEpInstruction);
 
                 isFpuEpRecoveryPresent = true;
             } else if (isNeutralInstruction && isFpuEnvironmentStored &&
@@ -6188,7 +6189,7 @@ function scanForObfuscations_Native() {
             var isControlRegisterAccess = currentEpOpCode === "MOV" && /\bCR[0-8]\b/i.test(currentEpInstruction);
 
             if (privilegedEpOpCodes.indexOf(currentEpOpCode) !== -1 || isControlRegisterAccess) {
-                log(logType.any, "Privileged instruction near user-mode EP: " + currentEpInstruction);
+                log(logType.emulation, "Privileged instruction near user-mode EP: " + currentEpInstruction);
 
                 privilegedEpOpCodeDetected = currentEpOpCode;
                 isPrivilegedEpOpCodePresent = true;
@@ -6222,7 +6223,7 @@ function scanForObfuscations_Native() {
 
             if (systemEpProbeOpCodes.indexOf(currentEpOpCode) !== -1) {
                 // One descriptor-table or machine-status read is a complete probe proof.
-                log(logType.any, "System-state probe near EP: " + currentEpInstruction);
+                log(logType.emulation, "System-state probe near EP: " + currentEpInstruction);
 
                 isSystemEpProbePresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
@@ -6254,7 +6255,7 @@ function scanForObfuscations_Native() {
             if (currentEpOpCode === "SYSCALL" || currentEpOpCode === "SYSENTER" ||
                 /^INT (?:0X0*2E|46)$/i.test(currentEpInstruction)) {
                 // Cover native x64/x86 fast calls and the legacy Windows INT 2E gateway.
-                log(logType.any, "Direct system call near EP: " + currentEpInstruction);
+                log(logType.emulation, "Direct system call near EP: " + currentEpInstruction);
 
                 isDirectEpSystemCallPresent = true;
             } else if (epScanStopOpCodes.indexOf(currentEpOpCode) !== -1 && currentEpOpCode !== "CALL") {
@@ -6325,7 +6326,7 @@ function scanForObfuscations_Native() {
             if (overlappingEpBranchTarget >= PE_Cached.addressOfUnmanagedEntryPoint &&
                 overlappingEpBranchTarget < overlappingEpScannedEndAddress &&
                 !overlappingEpInstructionStarts[overlappingEpBranchTarget.toString()]) {
-                log(logType.any, "Overlapping branch target near EP: 0x" + overlappingEpBranchTarget.toString(16));
+                log(logType.emulation, "Overlapping branch target near EP: 0x" + overlappingEpBranchTarget.toString(16));
 
                 isOverlappingEpCodePresent = true;
             }
@@ -6413,7 +6414,7 @@ function scanForObfuscations_Native() {
 
                 // A mapped target consumed through its proven register completes the proof.
                 if (indirectEpTargetAddress !== undefined && PE.VAToOffset(indirectEpTargetAddress) !== -1) {
-                    log(logType.any, "Indirect " + indirectTransfer[1].toUpperCase() + " transfer near EP to 0x" + indirectEpTargetAddress.toString(16));
+                    log(logType.emulation, "Indirect " + indirectTransfer[1].toUpperCase() + " transfer near EP to 0x" + indirectEpTargetAddress.toString(16));
 
                     isIndirectEpTransferPresent = true;
                 }
@@ -6519,7 +6520,7 @@ function scanForObfuscations_Native() {
                 trapFlagNeutralInstructionCount = 0;
             } else if (trapFlagState === 4 && trapFlagPopPattern.test(currentEpOpCode)) {
                 // Restoring the modified flags deliberately enables single-step execution.
-                log(logType.any, "Trap flag enabled near EP: " + currentEpInstruction);
+                log(logType.emulation, "Trap flag enabled near EP: " + currentEpInstruction);
 
                 isEpTrapFlagCheckPresent = true;
             } else if (trapFlagState === 1 && poppedFlagsRegister) {
@@ -6538,7 +6539,7 @@ function scanForObfuscations_Native() {
                 (trapFlagTestOpCode !== "BT" && ["JE", "JNE", "JNZ", "JZ"].indexOf(currentEpOpCode) !== -1)
             )) {
                 // Accept only branch families which consume the flags produced by BT or TEST/AND.
-                log(logType.any, "Trap flag checked near EP: " + currentEpInstruction);
+                log(logType.emulation, "Trap flag checked near EP: " + currentEpInstruction);
 
                 isEpTrapFlagCheckPresent = true;
             } else if (isStatePreservingInstruction && trapFlagState &&
@@ -7212,7 +7213,7 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary && epCallPopIpRecoveryAddress !== -1) {
         // The shared pass already validated both the Pop target and later pointer use.
-        log(logType.any, "Call/Pop IP recovery near EP");
+        log(logType.emulation, "Call/Pop IP recovery near EP");
 
         isCallPopEpIpRecoveryPresent = true;
     }
@@ -7228,7 +7229,7 @@ function scanForObfuscations_Native() {
 
     if (epSelfModifyingCallStubAddress !== -1) {
         // Either one strict stub or three generic section-local stubs proved reconstruction.
-        log(logType.any, "Self-modifying call stub near EP: 0x" + epSelfModifyingCallStubAddress.toString(16));
+        log(logType.emulation, "Self-modifying call stub near EP: 0x" + epSelfModifyingCallStubAddress.toString(16));
 
         isSelfModifyingEpCallStubPresent = true;
     }
@@ -7247,7 +7248,7 @@ function scanForObfuscations_Native() {
     if (!PE_Cached.isDynamicLinkLibrary &&
         epBitstreamAdcCount >= 8 && epBitstreamMovsbCount >= 2 && epBitstreamIndirectTransferPresent) {
         // Require all three independent components before reporting the compound behavior.
-        log(logType.any, "Bitstream unpacker near EP: Adc: " + epBitstreamAdcCount + ", Rep Movsb: " + epBitstreamMovsbCount);
+        log(logType.emulation, "Bitstream unpacker near EP: Adc: " + epBitstreamAdcCount + ", Rep Movsb: " + epBitstreamMovsbCount);
 
         isBitstreamEpUnpackerPresent = true;
     }
@@ -7263,7 +7264,7 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary && epNoncanonicalShiftCount >= 5) {
         // Five encodings establish a generator habit rather than one hand-written oddity.
-        log(logType.any, "Noncanonical shifts near EP: " + epNoncanonicalShiftCount);
+        log(logType.emulation, "Noncanonical shifts near EP: " + epNoncanonicalShiftCount);
 
         isNoncanonicalEpShiftPresent = true;
     }
@@ -7279,7 +7280,7 @@ function scanForObfuscations_Native() {
 
     if (!PE_Cached.isDynamicLinkLibrary && epStackMutationCount >= 4 && epComplexStackMutationCount !== 0) {
         // Density supplies repetition; the uncommon transform supplies specificity.
-        log(logType.any, "Stack mutations near EP: " + epStackMutationCount + " (complex: " + epComplexStackMutationCount + ")");
+        log(logType.emulation, "Stack mutations near EP: " + epStackMutationCount + " (complex: " + epComplexStackMutationCount + ")");
 
         isComplexEpStackMutationPresent = true;
     }
@@ -7298,7 +7299,7 @@ function scanForObfuscations_Native() {
     if (!PE_Cached.isDynamicLinkLibrary &&
         epFlagsTransferPresent && epRolPresent && epRorPresent && epAdcPresent && epRareBitOpCount >= 5) {
         // Every mandatory family must be reachable; isolated arithmetic is insufficient.
-        log(logType.any, "Mixed bit-operation families near EP: " + epRareBitOpCount);
+        log(logType.emulation, "Mixed bit-operation families near EP: " + epRareBitOpCount);
 
         isMixedEpBitOpsPresent = true;
     }
@@ -7327,7 +7328,7 @@ function scanForObfuscations_Native() {
         // Independent minima keep every required behavior present. Unbalanced explicit stack
         // traffic rejects ordinary callees, transformation diversity and distribution exclude
         // fixed unpacking loops, and combined density rejects incidental mixtures.
-        log(logType.any, "Irregular ctrl flow near EP: branches/back: " +
+        log(logType.emulation, "Irregular ctrl flow near EP: branches/back: " +
             epPolymorphismBranchCount + "/" + epPolymorphismBackwardControlFlowCount +
             ", Call: " + epPolymorphismCallCount +
             ", Push/Pop: " + epPolymorphismPushCount + "/" + epPolymorphismPopCount +
@@ -7367,7 +7368,7 @@ function scanForObfuscations_Native() {
 
                     // Check whether the instruction matches the requested opcode.
                     if (currentEpOpCode === opCodeToCheck) {
-                        log(logType.any, opCodeToCheck + " near EP found at instruction index: " + i);
+                        log(logType.emulation, opCodeToCheck + " near EP found at instruction index: " + i);
 
                         strangeOpCodeDetected = opCodeToCheck;
 
@@ -7710,7 +7711,7 @@ function scanForObfuscations_Native() {
                             // A physically backed target inside the candidate section completes the proof.
                             isUnderreportedStartupCodePresent = true;
 
-                            log(logType.any, "EP control flow reaches underreported section #" + protectedStartupSectionIndex + " at 0x" + protectedStartupTargetAddress.toString(16));
+                            log(logType.emulation, "EP control flow reaches underreported section #" + protectedStartupSectionIndex + " at 0x" + protectedStartupTargetAddress.toString(16));
                         } else if (protectedStartupOpCode === "JMP" || protectedStartupOpCode === "JMPF") {
                             // Unconditional jumps retain only their explicit destination.
                             protectedStartupPendingAddresses.push(protectedStartupTargetAddress);
@@ -9099,7 +9100,8 @@ function addOption(optionsText, newOptionText) {
  *                                 -2: Error, 
  *                                 -1: About, 
  *                                  1: Any, 
- *                                  2: .NET.
+ *                                  2: .NET,
+ *                                  3: Instruction emulation.
  * @param {string} messageText - The text of the message to log. 
  *                               Must not contain newline characters.
  * @throws Will throw an error if the messageText contains a newline character.
@@ -9127,6 +9129,7 @@ function log(messageTypeId, messageText) {
         case logType.about: prefix += "About"; break;
         case logType.any: prefix += "Any"; break;
         case logType.net: prefix += ".NET"; break;
+        case logType.emulation: prefix += "EMU"; break;
     }
 
     if (typeof _log !== "undefined") {
