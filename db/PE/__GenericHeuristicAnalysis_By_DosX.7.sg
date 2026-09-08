@@ -6609,6 +6609,12 @@ function scanForObfuscations_Native() {
             epDirectCallTargets = {},
             epPopRegisterByAddress = {};
 
+        // A statically proven synthetic Ret is an unconditional branch in disguise. Continue
+        // from its image target so the shared CFG sees the real decoder behind the EP facade.
+        if (isSyntheticEpTransferPresent && syntheticEpTargetAddress) {
+            epPolymorphismPendingAddresses.push(parseInt(syntheticEpTargetAddress, 0));
+        }
+
         // Consume one reachable address at a time until the graph or global budget is exhausted.
         while (epPolymorphismPendingAddresses.length !== 0 &&
             epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
