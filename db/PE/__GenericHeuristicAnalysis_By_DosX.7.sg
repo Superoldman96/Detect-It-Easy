@@ -492,7 +492,7 @@ function scanForObfuscations_NET() {
 
     var isDosMessageModified = false;
 
-    if (PE.findSignature(PE.getDosStubOffset(), PE_Cached.dosStubSize, "'This program cannot be run in DOS mode.'") === -1) {
+    if (PE.findSignature(PE_Cached.dosStubOffset, PE_Cached.dosStubSize, "'This program cannot be run in DOS mode.'") === -1) {
         log(logType.net, "DOS-stub modified!");
 
         isDosMessageModified = true;
@@ -3303,19 +3303,23 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
 
     var compressedSectionIndex = -1;
 
+    var compressedSectionName = String();
+
     for (var t = 0; t < PE_Cached.numberOfSections && !isCompressedSectionPresent; t++) {
         compressedSectionIndex = t;
         if (PE.section[t].FileOffset === 0 || PE.section[t].FileSize < 0x1000) continue;
 
         var sectionEntropy = PE.calculateEntropy(PE.getSectionFileOffset(compressedSectionIndex), PE.getSectionFileSize(compressedSectionIndex));
         if (sectionEntropy > 7.4) {
-            log(logType.any, "Section #" + compressedSectionIndex + " (\"" + cleanSectionName(PE.getSectionName(compressedSectionIndex)) + "\") entropy: " + sectionEntropy);
+            compressedSectionName = cleanSectionName(PE.getSectionName(compressedSectionIndex));
+
+            log(logType.any, "Section #" + compressedSectionIndex + " (\"" + compressedSectionName + "\") entropy: " + sectionEntropy);
 
             isCompressedSectionPresent = true;
         }
     }
 
-    if (isCompressedSectionPresent) options = addOption(options, "Section #" + compressedSectionIndex + " (\"" + cleanSectionName(PE.getSectionName(compressedSectionIndex)) + "\") compressed");
+    if (isCompressedSectionPresent) options = addOption(options, "Section #" + compressedSectionIndex + " (\"" + compressedSectionName + "\") compressed");
 
 
 
@@ -3440,7 +3444,7 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
     var isPeAtOverlayDetected = false;
 
     if (PE.isOverlayPresent() &&
-        PE.getOverlaySize() >= 100 &&
+        PE_Cached.overlaySize >= 100 &&
         PE.compareOverlay("'MZ'")) {
         log(logType.any, "PE signature at overlay detected");
 
@@ -3735,7 +3739,7 @@ function scanForBadFileFormat_NET_and_Native() {
     const isEntryPointCorrect = PE.isEntryPointCorrect();
 
     if (PE.isTLSPresent()) {
-        const corruptedDataEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE.getImageBase();
+        const corruptedDataEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE_Cached.imageBase;
 
         if (corruptedDataEntryPointRva > 0) {
             for (var i = 0; i < PE_Cached.numberOfSections && !isTlsVirtualEntryPoint; i++) {
@@ -3890,7 +3894,7 @@ function scanForBadFileFormat_NET_and_Native() {
 
     var isWindowsAuthenticodeStripped = false;
 
-    if (PE.getOverlaySize() < 0x4B0) {
+    if (PE_Cached.overlaySize < 0x4B0) {
         var securityDirOffset = getOptHeaderOffset() + (PE_Cached.is64bit ? 0x90 : 0x80);
 
         if (PE.read_int32(securityDirOffset) !== 0 && PE.read_int32(securityDirOffset + 4) !== 0) {
@@ -3931,19 +3935,23 @@ function scanForDebugData_NET_and_Native() { // For .NET and Native apps
 
     var debugSectionIndex = -1;
 
+    var debugSectionName = String();
+
     for (var i = 0; i < PE_Cached.numberOfSections && !isDebugSectionPresent; i++) {
         debugSectionIndex = i;
 
         const currentSectionName = PE.getSectionName(i);
 
         if (/(?:debug|^\.stab(?:str)?$)/i.test(currentSectionName)) { // Detects TCC/GCC and modern LLVM debug sections
-            log(logType.any, "Debug section detected: \"" + cleanSectionName(PE.getSectionName(debugSectionIndex)) + "\"");
+            debugSectionName = cleanSectionName(currentSectionName);
+
+            log(logType.any, "Debug section detected: \"" + debugSectionName + "\"");
 
             isDebugSectionPresent = true;
         }
     }
 
-    if (isDebugSectionPresent) options = "Section #" + debugSectionIndex + " (\"" + cleanSectionName(PE.getSectionName(debugSectionIndex)) + "\")";
+    if (isDebugSectionPresent) options = "Section #" + debugSectionIndex + " (\"" + debugSectionName + "\")";
 
 
 
@@ -4160,9 +4168,9 @@ function validateNetByteCode(byteCode) {
         if (PE_Cached.numberOfSections > 1) {
             if (sectionOffset === 0 || sectionSize === 0) {
                 continue;
-            } else if (i === PE.getResourceSection() && sectionName === ".rsrc" && i !== PE.getRelocsSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getImportSection()) {
+            } else if (i === PE_Cached.indexOfResourceSection && sectionName === ".rsrc" && i !== PE_Cached.indexOfRelocsSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfImportsSection) {
                 continue;
-            } else if (i === PE.getRelocsSection() && sectionName === ".reloc" && i !== PE.getResourceSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getImportSection()) {
+            } else if (i === PE_Cached.indexOfRelocsSection && sectionName === ".reloc" && i !== PE_Cached.indexOfResourceSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfImportsSection) {
                 continue;
             }
         }
@@ -4765,7 +4773,7 @@ function scanForObfuscations_Native() {
 
         // Iterate through messages to check for custom DOS
         for (var d = 0; d < messages.length && isCustomDosPresent; d++) {
-            if (PE.isSignaturePresent(PE.getDosStubOffset(), PE_Cached.dosStubSize, "'" + messages[d] + "'")) {
+            if (PE.isSignaturePresent(PE_Cached.dosStubOffset, PE_Cached.dosStubSize, "'" + messages[d] + "'")) {
                 isCustomDosPresent = false;
             }
         }
@@ -4929,7 +4937,7 @@ function scanForObfuscations_Native() {
 
     var isPhantomEatPresent = false;
 
-    if (PE_Cached.numberOfUnmanagedExports === 0 && PE.getExportSection() !== -1) {
+    if (PE_Cached.numberOfUnmanagedExports === 0 && PE_Cached.indexOfExportsSection !== -1) {
         isPhantomEatPresent = true;
     }
 
@@ -6861,7 +6869,7 @@ function scanForObfuscations_Native() {
             var epDirectCallTargetAddress = parseInt(epDirectCallTargetKey, 10);
 
             if (epSelfModifyingCallStubAddress === -1) {
-                var epSelfModifyingCallStubTargetRva = epDirectCallTargetAddress - PE.getImageBase(),
+                var epSelfModifyingCallStubTargetRva = epDirectCallTargetAddress - PE_Cached.imageBase,
                     epSelfModifyingCallStubSectionIndex = -1;
 
                 // A normal compiler has no reason to call a physically-backed writable code
@@ -6897,7 +6905,7 @@ function scanForObfuscations_Native() {
                         epSelfModifyingCallStubIndex < epSelfModifyingCallStubLookaheadLimit &&
                         epSelfModifyingCallStubAddress === -1;
                         epSelfModifyingCallStubIndex++) {
-                        var epSelfModifyingCallStubCurrentRva = epSelfModifyingCallStubCurrentAddress - PE.getImageBase();
+                        var epSelfModifyingCallStubCurrentRva = epSelfModifyingCallStubCurrentAddress - PE_Cached.imageBase;
 
                         if (epSelfModifyingCallStubCurrentRva < epSelfModifyingCallStubSectionRva ||
                             epSelfModifyingCallStubCurrentRva >= epSelfModifyingCallStubSectionRva + epSelfModifyingCallStubSectionRawSize ||
@@ -6992,7 +7000,7 @@ function scanForObfuscations_Native() {
                             epRepeatedSelfModifyingCallStubIndex < epRepeatedSelfModifyingCallStubLookaheadLimit &&
                             epSelfModifyingCallStubAddress === -1;
                             epRepeatedSelfModifyingCallStubIndex++) {
-                            var epRepeatedSelfModifyingCallStubCurrentRva = epRepeatedSelfModifyingCallStubCurrentAddress - PE.getImageBase();
+                            var epRepeatedSelfModifyingCallStubCurrentRva = epRepeatedSelfModifyingCallStubCurrentAddress - PE_Cached.imageBase;
 
                             if (epRepeatedSelfModifyingCallStubCurrentRva < epSelfModifyingCallStubSectionRva ||
                                 epRepeatedSelfModifyingCallStubCurrentRva >= epSelfModifyingCallStubSectionRva + epSelfModifyingCallStubSectionRawSize ||
@@ -7049,7 +7057,7 @@ function scanForObfuscations_Native() {
                                         epRepeatedSelfModifyingCallStubInstructionLength + epRepeatedSelfModifyingCallStubDisplacement;
                                 }
 
-                                var epRepeatedSelfModifyingCallStubSectionAddress = PE.getImageBase() + epSelfModifyingCallStubSectionRva;
+                                var epRepeatedSelfModifyingCallStubSectionAddress = PE_Cached.imageBase + epSelfModifyingCallStubSectionRva;
 
                                 // Require the write to remain inside the same executable/writable
                                 // section and close enough to reconstruct the current stub.
@@ -7124,7 +7132,7 @@ function scanForObfuscations_Native() {
             // Inspect a short physical window after Pop; long-distance use would be too
             // easy to confuse with ordinary register data flow and would increase FP.
             for (var epIpRecoveryIndex = 0; epIpRecoveryIndex < epCallPopIpRecoveryLookaheadLimit; epIpRecoveryIndex++) {
-                var epIpRecoveryCurrentRva = epIpRecoveryCurrentAddress - PE.getImageBase(),
+                var epIpRecoveryCurrentRva = epIpRecoveryCurrentAddress - PE_Cached.imageBase,
                     epIpRecoverySectionIndex = -1;
 
                 // The proof lookahead is linear and intentionally short, but every decoded
@@ -7385,7 +7393,7 @@ function scanForObfuscations_Native() {
     var isTlsHiddenEpPresent = false;
 
     if (PE.isTLSPresent()) {
-        const tlsEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE.getImageBase();
+        const tlsEntryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE_Cached.imageBase;
 
         var isTlsEntryPointInExecutableVirtualSection = false,
             isTlsEntryPointPhysicallyBacked = false,
@@ -7410,7 +7418,7 @@ function scanForObfuscations_Native() {
                     // Check both the declared raw span and the actual file mapping. This
                     // rejects zero-filled section tails as well as truncated raw data.
                     if (tlsEntryPointOffsetInSection < tlsEntryPointSectionFileSize &&
-                        PE.getSectionFileOffset(i) + tlsEntryPointOffsetInSection < PE.getSize() &&
+                        PE.getSectionFileOffset(i) + tlsEntryPointOffsetInSection < PE_Cached.fileSize &&
                         PE.VAToOffset(PE_Cached.addressOfUnmanagedEntryPoint) !== -1) {
                         isTlsEntryPointPhysicallyBacked = true;
                     }
@@ -7515,7 +7523,7 @@ function scanForObfuscations_Native() {
     var isEpInNonExecutableSection = false;
 
     // Find the section that contains the entry point
-    const entryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE.getImageBase();
+    const entryPointRva = PE_Cached.addressOfUnmanagedEntryPoint - PE_Cached.imageBase;
 
     for (var i = 0; i < PE_Cached.numberOfSections && !isEpSectionZeroPaddingPresent; i++) {
         const
@@ -7642,7 +7650,7 @@ function scanForObfuscations_Native() {
             protectedStartupSectionCharacteristics = protectedStartupSection.Characteristics,
             protectedStartupSectionRequiredFlags = SECTION_FLAGS_CODE | SECTION_FLAGS_EXECUTE | SECTION_FLAGS_READ,
             protectedStartupSectionFileSize = PE.getSectionFileSize(protectedStartupSectionIndex),
-            protectedStartupSectionStartAddress = PE.getImageBase() + PE.getSectionVirtualAddress(protectedStartupSectionIndex),
+            protectedStartupSectionStartAddress = PE_Cached.imageBase + PE.getSectionVirtualAddress(protectedStartupSectionIndex),
             protectedStartupSectionEndAddress = protectedStartupSectionStartAddress + Math.max(
                 PE.getSectionVirtualSize(protectedStartupSectionIndex),
                 protectedStartupSectionFileSize
@@ -8745,8 +8753,8 @@ function isNetMetaDataPresent() {
     }
 
     // Check if the offsets are within the bounds of the PE file size
-    if (clrDirOffset + 8 > PE.getSize() ||
-        numRvaAndSizesOffset + 4 > PE.getSize()) {
+    if (clrDirOffset + 8 > PE_Cached.fileSize ||
+        numRvaAndSizesOffset + 4 > PE_Cached.fileSize) {
         return false;
     }
 
@@ -10272,12 +10280,12 @@ function scanForMaliciousCode_NET_and_Native() {
                 var currentSection = PE.section[x];
 
                 if ((currentSection.Characteristics & SECTION_FLAGS_RWX_MASK) &&
-                    PE.getEntryPointSection() !== x &&
-                    PE.getResourceSection() !== x &&
-                    PE.getImportSection() !== x &&
-                    PE.getExportSection() !== x &&
-                    PE.getRelocsSection() !== x &&
-                    PE.getTLSSection() !== x &&
+                    PE_Cached.indexOfEntryPointSection !== x &&
+                    PE_Cached.indexOfResourceSection !== x &&
+                    PE_Cached.indexOfImportsSection !== x &&
+                    PE_Cached.indexOfExportsSection !== x &&
+                    PE_Cached.indexOfRelocsSection !== x &&
+                    PE_Cached.indexOfTlsSection !== x &&
                     PE.calculateEntropy(currentSection.FileOffset, currentSection.FileSize) > 7.25 &&
                     PE.isSignatureInSectionPresent(x,
                         "55" +        // push ebp
@@ -10845,21 +10853,18 @@ function scanForMaliciousCode_NET_and_Native() {
             if (PE_Cached.numberOfSections > 1) {
                 if (sectionOffset === 0 || sectionSize < 0x2000) {
                     continue;
-                } else if (!PE_Cached.isDotNet && i === PE.getEntryPointSection() && sectionName === ".text" && i === 0) {
+                } else if (!PE_Cached.isDotNet && i === PE_Cached.indexOfEntryPointSection && sectionName === ".text" && i === 0) {
                     continue;
-                } else if (i === PE.getResourceSection() && sectionName === ".rsrc" && i !== PE.getImportSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getRelocsSection()) {
+                } else if (i === PE_Cached.indexOfResourceSection && sectionName === ".rsrc" && i !== PE_Cached.indexOfImportsSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfRelocsSection) {
                     continue;
-                } else if (i === PE.getImportSection() && sectionName === ".idata" && i !== PE.getResourceSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getRelocsSection()) {
+                } else if (i === PE_Cached.indexOfImportsSection && sectionName === ".idata" && i !== PE_Cached.indexOfResourceSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfRelocsSection) {
                     continue;
-                } else if (i === PE.getRelocsSection() && sectionName === ".reloc" && i !== PE.getResourceSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getImportSection()) {
+                } else if (i === PE_Cached.indexOfRelocsSection && sectionName === ".reloc" && i !== PE_Cached.indexOfResourceSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfImportsSection) {
                     continue;
                 }
             }
 
-            var secOffset = PE.section[i].FileOffset,
-                secSize = PE.section[i].FileSize;
-
-            scanArea(secOffset, secSize);
+            scanArea(sectionOffset, sectionSize);
         }
     }
 
@@ -10876,7 +10881,7 @@ function scanForMaliciousCode_NET_and_Native() {
     }
 
     if (!isBase64Payload) {
-        scanArea(PE.getOverlayOffset(), PE.getOverlaySize());
+        scanArea(PE_Cached.overlayOffset, PE_Cached.overlaySize);
     }
 
     if (isBase64Payload) {
@@ -11066,8 +11071,8 @@ function scanForMaliciousCode_NET_and_Native() {
 
     // 2. Scan Overlay
     if (!isEncPePresent) {
-        var overlayOffset = PE.getOverlayOffset(),
-            overlaySize = PE.getOverlaySize();
+        var overlayOffset = PE_Cached.overlayOffset,
+            overlaySize = PE_Cached.overlaySize;
 
         if (overlayOffset > 0 && overlaySize > 0x1000 && !PE.isSigned()) {
             var maxScanSize = Math.min(overlaySize, 0x14000),
@@ -11087,13 +11092,13 @@ function scanForMaliciousCode_NET_and_Native() {
             if (PE_Cached.numberOfSections > 1) {
                 if (sectionOffset === 0 || sectionSize < 0x2500) {
                     continue;
-                } if (!PE_Cached.isDotNet && i === PE.getEntryPointSection() && sectionName === ".text" && i === 0) {
+                } if (!PE_Cached.isDotNet && i === PE_Cached.indexOfEntryPointSection && sectionName === ".text" && i === 0) {
                     continue;
-                } else if (i === PE.getResourceSection() && sectionName === ".rsrc" && i !== PE.getImportSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getRelocsSection()) {
+                } else if (i === PE_Cached.indexOfResourceSection && sectionName === ".rsrc" && i !== PE_Cached.indexOfImportsSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfRelocsSection) {
                     continue;
-                } else if (i === PE.getImportSection() && sectionName === ".idata" && i !== PE.getResourceSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getRelocsSection()) {
+                } else if (i === PE_Cached.indexOfImportsSection && sectionName === ".idata" && i !== PE_Cached.indexOfResourceSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfRelocsSection) {
                     continue;
-                } else if (i === PE.getRelocsSection() && sectionName === ".reloc" && i !== PE.getResourceSection() && i !== PE.getEntryPointSection() && i !== PE.getTLSSection() && i !== PE.getImportSection()) {
+                } else if (i === PE_Cached.indexOfRelocsSection && sectionName === ".reloc" && i !== PE_Cached.indexOfResourceSection && i !== PE_Cached.indexOfEntryPointSection && i !== PE_Cached.indexOfTlsSection && i !== PE_Cached.indexOfImportsSection) {
                     continue;
                 }
             }
@@ -11123,6 +11128,7 @@ function scanForMaliciousCode_NET_and_Native() {
     const legalCopyrightInfo = PE.getVersionStringInfo("LegalCopyright");
 
     if (legalCopyrightInfo && !/(?:\(C\)|©|\bcopyright\b)/i.test(legalCopyrightInfo)) {
+        const legalCopyrightInfoLowerCase = legalCopyrightInfo.toLowerCase();
 
         const companyNamesDict = [
             // Big Tech — most commonly faked
@@ -11141,7 +11147,7 @@ function scanForMaliciousCode_NET_and_Native() {
         ];
 
         for (var i = 0; i < companyNamesDict.length; i++) {
-            if (new RegExp("\\b" + companyNamesDict[i] + "\\b").test(legalCopyrightInfo.toLowerCase()) &&
+            if (new RegExp("\\b" + companyNamesDict[i] + "\\b").test(legalCopyrightInfoLowerCase) &&
                 legalCopyrightInfo.indexOf("Microsoft.") !== 0) {
                 verdicts.push({
                     type: "Fake build info",
@@ -11174,6 +11180,14 @@ function scanForMaliciousCode_NET_and_Native() {
         "ShellExperienceHost.exe", "StartMenuExperienceHost.exe", "conhost.exe"
     ]);
 
+    const
+        originalFileName = PE.getVersionStringInfo("OriginalFilename"),
+        internalFileName = PE.getVersionStringInfo("InternalName"),
+        originalFileNameLowerCase = originalFileName.toLowerCase(),
+        internalFileNameLowerCase = internalFileName.toLowerCase(),
+        netAssemblyNameLowerCase = PE_Cached.nameOfNetAssemblyName.toLowerCase(),
+        netModuleNameLowerCase = PE_Cached.nameOfNetModuleName.toLowerCase();
+
     var isFakeOrInfected = false;
 
     function compareOriginalAndInternalNames(inputName) {
@@ -11182,8 +11196,8 @@ function scanForMaliciousCode_NET_and_Native() {
         inputName = inputName.toLowerCase();
 
         return (
-            PE.getVersionStringInfo("OriginalFilename").toLowerCase() === inputName ||
-            PE.getVersionStringInfo("InternalName").toLowerCase() === inputName
+            originalFileNameLowerCase === inputName ||
+            internalFileNameLowerCase === inputName
         );
     }
 
@@ -11219,17 +11233,17 @@ function scanForMaliciousCode_NET_and_Native() {
     // Check for obfuscated names and anomalous signs in .NET and native assemblies
 
     if (PE_Cached.isDotNet && (
-        PE_Cached.nameOfNetAssemblyName.toLowerCase() === "stub" ||
-        PE_Cached.nameOfNetModuleName.toLowerCase().indexOf("stub.") === 0 ||
-        PE_Cached.nameOfNetAssemblyName.toLowerCase().indexOf("crypted") !== -1 ||
-        PE_Cached.nameOfNetModuleName.toLowerCase().indexOf("crypted") !== -1 ||
-        PE_Cached.nameOfNetAssemblyName.toLowerCase().indexOf("payload") !== -1 ||
-        PE_Cached.nameOfNetModuleName.toLowerCase().indexOf("payload") !== -1 ||
+        netAssemblyNameLowerCase === "stub" ||
+        netModuleNameLowerCase.indexOf("stub.") === 0 ||
+        netAssemblyNameLowerCase.indexOf("crypted") !== -1 ||
+        netModuleNameLowerCase.indexOf("crypted") !== -1 ||
+        netAssemblyNameLowerCase.indexOf("payload") !== -1 ||
+        netModuleNameLowerCase.indexOf("payload") !== -1 ||
         isNameObfuscated(PE_Cached.nameOfNetAssemblyName) ||
         isNameObfuscated(PE_Cached.nameOfNetModuleName)
     ) ||
-        PE.getVersionStringInfo("OriginalFilename").toLowerCase().indexOf("stub.") === 0 ||
-        PE.getVersionStringInfo("InternalName").toLowerCase().indexOf("stub.") === 0 ||
+        originalFileNameLowerCase.indexOf("stub.") === 0 ||
+        internalFileNameLowerCase.indexOf("stub.") === 0 ||
         (function () {
             const fieldsToCheck = [
                 "Comments",
