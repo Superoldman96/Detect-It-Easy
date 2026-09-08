@@ -48,7 +48,7 @@ function detect() {
             sVersion = PE.getString(nVersionOffset + 4).trim().substring(0, 36);
         }
 
-        if (sVersion.match(/^\d+\/\d+\/\d+ \d+\.\d+/) && sVersion.indexOf(" for ") !== -1) {
+        if (sVersion.match(/^\d+\.\d+\.\d+/) && sVersion.indexOf(" for ") !== -1) {
             bDetected = true;
         }
 
