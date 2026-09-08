@@ -244,6 +244,7 @@ function stdout(stringToOut) {
  * Additionally compiles the obfuscation whitelist into case-sensitive and
  * case-insensitive regular expressions for repeated token checks. These cached
  * expressions are valid until {@link unloadCache} runs at the end of the scan.
+ * The linear entry-point disassembly cache is also reset for the current image.
  *
  * Side effects:
  *  - Mutates the global PE_Cached object by adding/updating cached values.
@@ -253,8 +254,20 @@ function stdout(stringToOut) {
  * @returns {void} No return value; updates PE_Cached as a side effect.
  */
 function initializeCache() {
+    const
+        architecture = getPeArchitecture(),
+        fileSize = PE.getSize(),
+        overlaySize = PE.getOverlaySize(),
+        dosStubOffset = PE.getDosStubOffset(),
+        dosStubSize = PE.getDosStubSize();
+
     var obfuscationWhitelistSources = [],
         obfuscationWhitelistInsensitiveSources = [];
+
+    // The engine context may be reused for several files. Start every scan with an empty
+    // linear-disassembly cache so instructions from a previous image cannot be returned.
+    epAsmInstructions = [];
+    epAsmInstructionAddresses = [];
 
     // Preserve individual anchors while combining patterns for one test per group.
     for (var i = 0; i < obfuscationWhitelistPatterns.length; i++) {
@@ -267,8 +280,9 @@ function initializeCache() {
 
     var cacheMap = {
         /* Computed values */
-        /* Number  */ fileBodySize: function () { return PE.getSize() - PE.getOverlaySize() - PE.getDosStubOffset() - PE.getDosStubSize(); },
-        /* Number  */ fileSubsystem: function () { return PE.getImageOptionalHeader("Subsystem"); },
+        /* Number  */ imageBodySize: function () { return fileSize - overlaySize - dosStubOffset - dosStubSize; },
+        /* Number  */ fileSize: function () { return fileSize; },
+        /* Number  */ imageSubsystem: function () { return PE.getImageOptionalHeader("Subsystem"); },
         /* RegExp  */ obfuscationWhitelist: function () { return new RegExp(obfuscationWhitelistSources.join("|")); },
         /* RegExp  */ obfuscationWhitelistInsensitive: function () { return new RegExp(obfuscationWhitelistInsensitiveSources.join("|"), "i"); },
         /* Native functions */
@@ -279,24 +293,32 @@ function initializeCache() {
         /* Boolean */ isNetGlobalCctorPresent: PE["isNetGlobalCctorPresent"],
         /* Boolean */ isRichSignaturePresent: PE["isRichSignaturePresent"],
         /* Number  */ addressOfUnmanagedEntryPoint: PE["getAddressOfEntryPoint"],
+        /* Number  */ imageBase: PE["getImageBase"],
+        /* Number  */ dosStubOffset: function () { return dosStubOffset; },
+        /* Number  */ dosStubSize: function () { return dosStubSize; },
+        /* Number  */ overlayOffset: PE["getOverlayOffset"],
+        /* Number  */ overlaySize: function () { return overlaySize; },
         /* Number  */ numberOfSections: PE["getNumberOfSections"],
         /* Number  */ numberOfRichIDs: PE["getNumberOfRichIDs"],
-        /* Number  */ dosStubSize: PE["getDosStubSize"],
         /* Number  */ numberOfUnmanagedResources: PE["getNumberOfResources"],
         /* Number  */ numberOfUnmanagedImports: PE["getNumberOfImports"],
         /* Number  */ numberOfUnmanagedExports: PE["getNumberOfExports"],
+        /* Number  */ indexOfEntryPointSection: PE["getEntryPointSection"],
         /* Number  */ indexOfImportsSection: PE["getImportSection"],
         /* Number  */ indexOfExportsSection: PE["getExportSection"],
+        /* Number  */ indexOfResourceSection: PE["getResourceSection"],
+        /* Number  */ indexOfTlsSection: PE["getTLSSection"],
+        /* Number  */ indexOfRelocsSection: PE["getRelocsSection"],
         /* String  */ nameOfNetAssemblyName: PE["getNetAssemblyName"],
         /* String  */ nameOfNetModuleName: PE["getNetModuleName"],
         /* Local functions */
-        /* String  */ architecture: getPeArchitecture,
-        /* Boolean */ isI386: function () { return getPeArchitecture() === "I386"; },
-        /* Boolean */ isAMD64: function () { return getPeArchitecture() === "AMD64"; },
-        /* Boolean */ isARM: function () { return getPeArchitecture() === "ARM"; },
-        /* Boolean */ isThumb: function () { const architecture = getPeArchitecture(); return architecture === "ARMNT" || architecture === "THUMB"; },
-        /* Boolean */ isARM64: function () { return getPeArchitecture() === "ARM64"; },
-        /* Boolean */ isArchX86: isArchX86,
+        /* String  */ architecture: function () { return architecture; },
+        /* Boolean */ isI386: function () { return architecture === "I386"; },
+        /* Boolean */ isAMD64: function () { return architecture === "AMD64"; },
+        /* Boolean */ isARM: function () { return architecture === "ARM"; },
+        /* Boolean */ isThumb: function () { return architecture === "ARMNT" || architecture === "THUMB"; },
+        /* Boolean */ isARM64: function () { return architecture === "ARM64"; },
+        /* Boolean */ isArchX86: function () { return architecture === "I386" || architecture === "AMD64"; },
         /* Boolean */ isCppClrLikeApp: isCppClrLikeApp,
         /* Boolean */ isVbNetStandardLibraryPresent: isVbNetStandardLibraryPresent,
         /* Boolean */ isJscriptNetStandardLibraryPresent: isJscriptNetStandardLibraryPresent,
@@ -321,8 +343,8 @@ function initializeCache() {
 
 
 /**
- * Clears the PE cache by removing all enumerable properties from PE_Cached.
- * It must be called after analysis so no values from the previous PE are reused.
+ * Clears the PE and linear-disassembly caches after analysis so no values from
+ * the previous image can be reused.
  * 
  * @function unloadCache
  * @returns {void} No return value; clears PE_Cached properties as a side effect.
@@ -331,6 +353,9 @@ function unloadCache() {
     for (var key in PE_Cached) {
         delete PE_Cached[key];
     }
+
+    epAsmInstructions = [];
+    epAsmInstructionAddresses = [];
 }
 
 
@@ -799,7 +824,7 @@ function scanForObfuscations_NET() {
 
 
 
-    const ctorSignatureOffset = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "'<Module>'00**");
+    const ctorSignatureOffset = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "'<Module>'00**");
     const afterCtorOffset = ctorSignatureOffset !== -1 ? ctorSignatureOffset + 8 : -1;
 
 
@@ -938,10 +963,10 @@ function scanForObfuscations_NET() {
 
     var isModuleCtorMultiple = false;
 
-    var currentCtorOffset = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "00'<Module>'00");
+    var currentCtorOffset = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "00'<Module>'00");
 
     if (currentCtorOffset !== -1) {
-        var secondCtorNameOffset = PE.findSignature(currentCtorOffset + 10, PE_Cached.fileBodySize, "'<Module>'");
+        var secondCtorNameOffset = PE.findSignature(currentCtorOffset + 10, PE_Cached.imageBodySize, "'<Module>'");
 
         if (secondCtorNameOffset !== -1 && PE.readByte(secondCtorNameOffset + 8) !== 0x00) {
             log(logType.net, "Fake <Module> detected! Offset: 0x" + Number(secondCtorNameOffset).toString(16));
@@ -1640,7 +1665,7 @@ function scanForAntiAnalysis_Native() {
         nativeAntiDebugType = String();
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const antiDebugNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
             "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             antiDebugGeneralPurposeRegister = "(?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:AX|BX|CX|DX|SI|DI|BP|8D?|9D?|1[0-5]D?))",
@@ -3321,11 +3346,11 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
             const currentSection = PE.section[sectionWithWrongOffsetOrSizeIndex];
 
             // Todo: add more checks
-            if (currentSection.FileOffset === 0x00 || currentSection.FileOffset > PE_Cached.fileBodySize) {
+            if (currentSection.FileOffset === 0x00 || currentSection.FileOffset > PE_Cached.imageBodySize) {
                 wrongOffset = true;
             }
 
-            if (currentSection.FileSize === 0x00 || currentSection.FileSize > PE_Cached.fileBodySize) {
+            if (currentSection.FileSize === 0x00 || currentSection.FileSize > PE_Cached.imageBodySize) {
                 wrongSize = true;
             }
 
@@ -3433,11 +3458,11 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
 
     // Conditions to check for a strange overlay
     if (!isPeAtOverlayDetected && !isSfx && !PE.isSigned() && PE.isOverlayPresent()) {
-        var overlayEntropy = PE.calculateEntropy(PE.getOverlayOffset(), PE.getOverlaySize());
+        var overlayEntropy = PE.calculateEntropy(PE_Cached.overlayOffset, PE_Cached.overlaySize);
 
-        if (PE.getOverlaySize() > 150 && overlayEntropy > 7 ||
-            PE.getOverlaySize() > PE_Cached.fileBodySize) {
-            log(logType.any, "Overlay size: " + PE.getOverlaySize() + " bytes; Entropy: " + overlayEntropy);
+        if (PE_Cached.overlaySize > 150 && overlayEntropy > 7 ||
+            PE_Cached.overlaySize > PE_Cached.imageBodySize) {
+            log(logType.any, "Overlay size: " + PE_Cached.overlaySize + " bytes; Entropy: " + overlayEntropy);
 
             hasStrangeOverlay = true;
         }
@@ -3473,7 +3498,7 @@ function scanForPackersAndCryptors_NET_and_Native() { // For .NET and Native app
 
     // Checks for high entropy (ignore overlay)
     if (!(PE_Cached.isDynamicLinkLibrary && (PE.section[".rdata"] || PE.isSectionNamePresent(".rsrc"))) && // .dll with resources
-        PE.calculateEntropy(PE_Cached.dosStubSize, PE_Cached.fileBodySize) > 7.3) {
+        PE.calculateEntropy(PE_Cached.dosStubSize, PE_Cached.imageBodySize) > 7.3) {
         isHighEntropy = true;
     }
 
@@ -3668,8 +3693,8 @@ function scanForLicensingSystems_NET_and_Native() { // For .NET and Native apps
     for (var i = 0; i < licesingStrings.length && !isInterestingStringsFound; i++) {
         const currentPatternToFind = licesingStrings[i];
 
-        if ((!PE_Cached.isDotNet && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "'" + currentPatternToFind + "'")) ||
-            PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.fileBodySize, convertStringToUnicodeSignature(currentPatternToFind))) {
+        if ((!PE_Cached.isDotNet && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "'" + currentPatternToFind + "'")) ||
+            PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.imageBodySize, convertStringToUnicodeSignature(currentPatternToFind))) {
             isInterestingStringsFound = true;
         }
     }
@@ -3959,7 +3984,7 @@ function scanForDebugData_NET_and_Native() { // For .NET and Native apps
 
     var pdbExtensionPatternOffset = PE.findSignature(
         PE_Cached.dosStubSize,
-        PE_Cached.fileBodySize,
+        PE_Cached.imageBodySize,
         "%% %% %% '.pdb' 00"
     );
 
@@ -4101,7 +4126,7 @@ function isFrameworkComponent() {
  */
 function validateSignature(pattern) {
     const
-        offsetFound = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.fileBodySize, pattern),
+        offsetFound = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.imageBodySize, pattern),
         resultBool = offsetFound !== -1;
 
     if (resultBool) {
@@ -4197,7 +4222,7 @@ function validateNetUnicodeString(ustring) {
  * @sideEffects Writes a general log entry when the string is found.
  */
 function validateGlobalUnicodeString(ustring) {
-    const result = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.fileBodySize, convertStringToUnicodeSignature(ustring)) !== -1;
+    const result = PE.findSignature(PE_Cached.dosStubSize, PE_Cached.imageBodySize, convertStringToUnicodeSignature(ustring)) !== -1;
     if (result) log(logType.nothing, "Unicode string found: \"" + ustring + "\"");
     return result;
 }
@@ -5933,7 +5958,7 @@ function scanForObfuscations_Native() {
     var isPebModuleWalkPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const pebModuleWalkNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
             "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             pebModuleWalkSegment = PE_Cached.isI386 ? "FS" : "GS",
@@ -6040,7 +6065,7 @@ function scanForObfuscations_Native() {
     var isFpuEpRecoveryPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isI386 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         var isFpuEnvironmentStored = false,
             fpuEpNeutralInstructionCount = 0,
             fpuEpCurrentAddress = PE_Cached.addressOfUnmanagedEntryPoint;
@@ -6118,7 +6143,7 @@ function scanForObfuscations_Native() {
     var privilegedEpOpCodeDetected = String();
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const privilegedEpOpCodes = [
             "CLAC", "CLGI", "CLI", "CLTS", "HLT", "IN", "INSB", "INSD", "INSW",
             "INVD", "INVLPG", "INVLPGA", "LGDT", "LIDT", "LLDT", "LMSW", "LTR",
@@ -6162,7 +6187,7 @@ function scanForObfuscations_Native() {
     var isSystemEpProbePresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const systemEpProbeOpCodes = ["SGDT", "SIDT", "SLDT", "SMSW", "STR"];
 
         // These non-privileged probes are distinctive only while they remain close to the
@@ -6195,7 +6220,7 @@ function scanForObfuscations_Native() {
     var isDirectEpSystemCallPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         // Scan the bounded startup stream for kernel-entry instructions emitted directly
         // by the image rather than reached through an imported operating-system wrapper.
         for (var i = 0; i < 256 && !isDirectEpSystemCallPresent; i++) {
@@ -6227,7 +6252,7 @@ function scanForObfuscations_Native() {
     var isOverlappingEpCodePresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         var overlappingEpInstructionStarts = {},
             overlappingEpBranchTargets = [],
             overlappingEpCurrentAddress = PE_Cached.addressOfUnmanagedEntryPoint,
@@ -6295,7 +6320,7 @@ function scanForObfuscations_Native() {
     var isIndirectEpTransferPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const indirectEpTransferPattern = new RegExp("^(JMP|CALL) (" + epGeneralPurposeRegister + ")$", "i"),
             indirectEpRegisterWritePattern = new RegExp("^(?:MOV(?:ABS)?|MOVZX|MOVSX|MOVSXD|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i");
 
@@ -6417,7 +6442,7 @@ function scanForObfuscations_Native() {
     var isEpTrapFlagCheckPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         const trapFlagNativeRegister = PE_Cached.isI386 ? "E(?:AX|BX|CX|DX|SI|DI|BP)" :
             "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             trapFlagStackPointer = PE_Cached.isI386 ? "ESP" : "RSP",
@@ -6571,7 +6596,7 @@ function scanForObfuscations_Native() {
 
     if ((!PE_Cached.isDynamicLinkLibrary || hasWritableExecutableSection) &&
         !PE_Cached.isDriver && PE_Cached.isArchX86 &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3)) {
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3)) {
         // Global and local limits bound the reachable graph and every secondary proof.
         // Patterns describe semantics rather than concrete registers or byte sequences.
         const
@@ -7508,7 +7533,7 @@ function scanForObfuscations_Native() {
     var isEpInNonCodeSection = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3) &&
         entryPointSectionIndex !== -1 && PE.isEntryPointCorrect() &&
         PE.getSectionFileSize(entryPointSectionIndex) !== 0 &&
         (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_EXECUTE) &&
@@ -7526,7 +7551,7 @@ function scanForObfuscations_Native() {
     var isDiscardableEpSectionPresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3) &&
         entryPointSectionIndex !== -1 &&
         (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_DISCARDABLE)) {
         isDiscardableEpSectionPresent = true;
@@ -7542,7 +7567,7 @@ function scanForObfuscations_Native() {
     var isUnreportedCodePresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3) &&
         entryPointSectionIndex !== -1 && PE.isEntryPointCorrect() &&
         PE.getSectionFileSize(entryPointSectionIndex) !== 0 &&
         (PE.section[entryPointSectionIndex].Characteristics & SECTION_FLAGS_EXECUTE) &&
@@ -7564,7 +7589,7 @@ function scanForObfuscations_Native() {
         isUnderreportedStartupCodePresent = false;
 
     if (!PE_Cached.isDynamicLinkLibrary && !PE_Cached.isDriver &&
-        (PE_Cached.fileSubsystem === 2 || PE_Cached.fileSubsystem === 3) &&
+        (PE_Cached.imageSubsystem === 2 || PE_Cached.imageSubsystem === 3) &&
         PE.getSizeOfCode() !== 0) {
         var physicalCodeSize = 0,
             physicalCodeSectionCount = 0;
@@ -7970,19 +7995,6 @@ function scanForObfuscations_Native() {
 
 
 /**
- * Determines if the PE file's operating system architecture is x86-based.
- *
- * @returns {boolean} True for I386 or AMD64; otherwise false.
- */
-function isArchX86() {
-    const architecture = getPeArchitecture();
-
-    return architecture === "I386" || architecture === "AMD64";
-}
-
-
-
-/**
  * Returns the architecture label reported by the PE parser.
  *
  * @returns {string} The first `getOperationSystemOptions()` field, or an empty string.
@@ -8035,19 +8047,10 @@ function emulateAndGetEpAsmPattern(onlyOpCodes, numberOf) {
     // Initialize the result with a pattern splitter
     var result = _patternSplitter;
 
-    // Get the address of the entry point
-    var disasmAddress = PE_Cached.addressOfUnmanagedEntryPoint;
-
     // Iterate through instructions up to the specified number
     for (var i = 0; i < numberOf; i++) {
-
-        // Update the address to the next instruction if not the first iteration
-        if (i >= 1) {
-            disasmAddress = PE.getDisasmNextAddress(disasmAddress);
-        }
-
-        // Get the assembly instruction at the current address
-        const asmInstruction = PE.getDisasmString(disasmAddress);
+        // Reuse the shared linear cache instead of decoding the same EP prefix again.
+        const asmInstruction = emulateAndGetAsmInstructionByIndex(i);
 
         if (!asmInstruction) break; // Safety check
 
@@ -8065,47 +8068,47 @@ function emulateAndGetEpAsmPattern(onlyOpCodes, numberOf) {
 
 
 
-var epAsmInstructions = [];
+var epAsmInstructions = [],
+    epAsmInstructionAddresses = [];
 
 /**
  * Retrieves the assembly instruction at the specified zero-based index from the PE entry point.
  *
  * @param {number} index - The index of the assembly instruction to retrieve.
  * @returns {string|undefined} The disassembled instruction, or undefined when unavailable.
- * @sideEffects Caches retrieved instructions in the global `epAsmInstructions` array.
+ * @sideEffects Caches retrieved instructions and addresses in the global EP arrays.
  * @example
  * emulateAndGetAsmInstructionByIndex(0); // "PUSH EBP"
  */
 function emulateAndGetAsmInstructionByIndex(index) {
     // Check if the instruction is already cached
     if (epAsmInstructions[index] !== undefined) {
-        return epAsmInstructions[index];
+        return epAsmInstructions[index] || undefined;
     }
 
-    // Get the address of the entry point
-    var disasmAddress = PE_Cached.addressOfUnmanagedEntryPoint;
+    var firstUncachedIndex = epAsmInstructions.length,
+        disasmAddress = PE_Cached.addressOfUnmanagedEntryPoint;
 
-    // Iterate through instructions until the specified index is reached
-    for (var i = 0; i <= index; i++) {
+    // A failed decode terminates the physical instruction stream. Remembering that boundary
+    // prevents every later request from retrying the same invalid address.
+    if (firstUncachedIndex !== 0) {
+        if (!epAsmInstructions[firstUncachedIndex - 1]) return undefined;
 
-        // Update the address to the next instruction if not the first iteration
-        if (i >= 1) {
-            disasmAddress = PE.getDisasmNextAddress(disasmAddress);
-        }
-
-        // Cache the instruction if it hasn't been cached yet
-        if (epAsmInstructions[i] === undefined) {
-            epAsmInstructions[i] = PE.getDisasmString(disasmAddress);
-
-            if (!epAsmInstructions[i]) break; // Safety check
-        }
-
-        // If the current iteration matches the specified index, retrieve the instruction
-        if (i === index) {
-            // Return the assembly instruction from cache
-            return epAsmInstructions[index];
-        }
+        disasmAddress = PE.getDisasmNextAddress(epAsmInstructionAddresses[firstUncachedIndex - 1]);
     }
+
+    // Extend the cache only from its current tail. Sequential consumers therefore walk each
+    // instruction boundary once instead of restarting from EP for every requested index.
+    for (var i = firstUncachedIndex; i <= index; i++) {
+        if (i !== firstUncachedIndex) disasmAddress = PE.getDisasmNextAddress(disasmAddress);
+
+        epAsmInstructionAddresses[i] = disasmAddress;
+        epAsmInstructions[i] = PE.getDisasmString(disasmAddress);
+
+        if (!epAsmInstructions[i]) break; // Safety check
+    }
+
+    return epAsmInstructions[index] || undefined;
 }
 
 
@@ -8160,7 +8163,11 @@ function getFirstEpAsmInstruction() {
  * getAsmOpCode("MOV EAX, 4"); // "MOV"
  */
 function getAsmOpCode(instruction) {
-    return instruction ? (instruction.indexOf(" ") !== -1 ? instruction.split(" ")[0] : instruction) : instruction;
+    if (!instruction) return instruction;
+
+    const separatorIndex = instruction.indexOf(" ");
+
+    return separatorIndex === -1 ? instruction : instruction.substring(0, separatorIndex);
 }
 
 
@@ -8785,7 +8792,7 @@ function scanForLanguagesAndCompilers_NET_and_Native() {
             langName = extdb[i][0],
             langExtName = extdb[i][1];
 
-        if (PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "%% %% %% %% %% %% %% %% '." + langExtName + "' 00")) {
+        if (PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "%% %% %% %% %% %% %% %% '." + langExtName + "' 00")) {
             log(logType.any, "Lines of ." + langExtName + " files (" + langName + ") detected");
 
             _setLangByHeur(langName);
@@ -8793,7 +8800,7 @@ function scanForLanguagesAndCompilers_NET_and_Native() {
     }
 
 
-    if (!_isLangDetected("C++") && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "%% %% %% %% %% %% %% %% %% %% '.c' 00")) {
+    if (!_isLangDetected("C++") && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "%% %% %% %% %% %% %% %% %% %% '.c' 00")) {
         log(logType.any, "Lines of .c files (C) detected (not a C++)");
 
         _setLangByHeur("C");
@@ -9015,7 +9022,7 @@ function scanForLanguagesAndCompilers_NET_and_Native() {
         }
     }
 
-    if (isPpLibraryPresent || (c_cpp && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.fileBodySize, "' C++ '"))) {
+    if (isPpLibraryPresent || (c_cpp && PE.isSignaturePresent(PE_Cached.dosStubSize, PE_Cached.imageBodySize, "' C++ '"))) {
         _setLangByHeur("C++");
     } else if (!_isLangPresent("C++") && isCLibraryPresent && (PE.isFunctionPresent("_iob") || PE.isFunctionPresent("printf") || PE.isFunctionPresent("malloc") || PE.isFunctionPresent("memset"))) {
         _setLangByHeur("C");
