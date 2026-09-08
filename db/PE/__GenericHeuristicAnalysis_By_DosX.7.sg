@@ -6535,10 +6535,27 @@ function scanForObfuscations_Native() {
 
     // Collect orthogonal behavioral facts during one CFG walk. Separate counters let the
     // verdict rules below combine only the evidence relevant to their own FP threshold.
+    const
+        epPolymorphismBranchRequiredCount = 10,
+        epPolymorphismCallRequiredCount = 2,
+        epPolymorphismPushRequiredCount = 11,
+        epPolymorphismStackImbalanceRequiredCount = 4,
+        epPolymorphismTransformRequiredCount = 7,
+        epPolymorphismTransformKindRequiredCount = 5,
+        epPolymorphismDensityRequiredCount = 30;
+
     var epNoncanonicalShiftCount = 0,
         epStackMutationCount = 0,
         epComplexStackMutationCount = 0,
         epRareBitOpCount = 0,
+        epPolymorphismBranchCount = 0,
+        epPolymorphismBackwardControlFlowCount = 0,
+        epPolymorphismCallCount = 0,
+        epPolymorphismPushCount = 0,
+        epPolymorphismPopCount = 0,
+        epPolymorphismTransformCount = 0,
+        epPolymorphismTransformKindCount = 0,
+        epPolymorphismDominantTransformCount = 0,
         epBitstreamAdcCount = 0,
         epBitstreamMovsbCount = 0,
         epCallPopIpRecoveryAddress = -1,
@@ -6598,6 +6615,13 @@ function scanForObfuscations_Native() {
             ],
             epRareBitOpCodes = [
                 "ADC", "SBB", "ROL", "ROR", "BT", "BTC", "BTR", "BTS", "BSWAP", "XADD"
+            ],
+            // These uncommon transformations are safe only as one component of the compound
+            // flow profile. Requiring repetition avoids treating ordinary low-level code as junk.
+            epPolymorphismTransformOpCodes = [
+                "AAA", "AAD", "AAM", "AAS", "ADC", "BSF", "BSR", "BSWAP", "BT", "BTC",
+                "BTR", "BTS", "CMC", "DAA", "DAS", "LAHF", "RCL", "RCR", "ROL", "ROR",
+                "SAHF", "SAL", "SHLD", "SHRD", "STC", "XADD", "XCHG"
             ];
 
         // The FIFO starts at EP. Visited addresses prevent loops, while the two call maps
@@ -6605,6 +6629,7 @@ function scanForObfuscations_Native() {
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
             epPolymorphismVisitedAddresses = {},
             epPolymorphismVisitedInstructionCount = 0,
+            epPolymorphismTransformOpCodesFound = {},
             epRareBitOpCodesFound = {},
             epDirectCallTargets = {},
             epPopRegisterByAddress = {};
@@ -6651,6 +6676,38 @@ function scanForObfuscations_Native() {
                 epPolymorphismInstructionLength = PE.getDisasmLength(epPolymorphismCurrentAddress);
 
             if (!epPolymorphismOpCode || epPolymorphismInstructionLength <= 0) continue;
+
+            // Count explicit stack traffic. Calls are kept separate because their implicit
+            // return-address push has normal compiler semantics and must not inflate Push.
+            if (epPolymorphismOpCode === "PUSH") epPolymorphismPushCount++;
+
+            if (epPolymorphismOpCode === "POP") epPolymorphismPopCount++;
+
+            // Repeated uncommon transforms distinguish generated decoder/dispatcher code from
+            // a compiler startup routine. Their diversity separates polymorphism from a fixed
+            // decompressor which repeats only a few instruction families.
+            if (epPolymorphismTransformOpCodes.indexOf(epPolymorphismOpCode) !== -1) {
+                epPolymorphismTransformCount++;
+
+                if (!epPolymorphismTransformOpCodesFound[epPolymorphismOpCode]) {
+                    epPolymorphismTransformOpCodesFound[epPolymorphismOpCode] = 0;
+                    epPolymorphismTransformKindCount++;
+                }
+
+                epPolymorphismTransformOpCodesFound[epPolymorphismOpCode]++;
+
+                if (epPolymorphismTransformOpCodesFound[epPolymorphismOpCode] > epPolymorphismDominantTransformCount) {
+                    epPolymorphismDominantTransformCount = epPolymorphismTransformOpCodesFound[epPolymorphismOpCode];
+                }
+            }
+
+            // Count every reachable call spelling, including indirect dispatcher calls.
+            if (epPolymorphismOpCode === "CALL") epPolymorphismCallCount++;
+
+            // Conditional, unconditional and loop branches all contribute to CFG fragmentation.
+            if (/^(?:J[A-Z]+|LOOP(?:E|NE|NZ|Z)?)$/.test(epPolymorphismOpCode)) {
+                epPolymorphismBranchCount++;
+            }
 
             // Keep both sides of Call/Pop pairs because a branch may make the target appear
             // before its call in the worklist. A match is accepted only after both addresses
@@ -6729,6 +6786,11 @@ function scanForObfuscations_Native() {
 
             if (epPolymorphismDirectControlFlow) {
                 var epPolymorphismTargetAddress = parseInt(epPolymorphismDirectControlFlow[2], 0);
+
+                // Direct backward calls and branches both form dispatcher return edges.
+                if (epPolymorphismTargetAddress < epPolymorphismCurrentAddress) {
+                    epPolymorphismBackwardControlFlowCount++;
+                }
 
                 if (epPolymorphismOpCode === "CALL") {
                     var epPolymorphismTargetKey = epPolymorphismTargetAddress.toString();
@@ -7087,6 +7149,7 @@ function scanForObfuscations_Native() {
         // Clean up: release the control-flow worklist and its potentially dense visited set.
         epPolymorphismPendingAddresses = undefined;
         epPolymorphismVisitedAddresses = undefined;
+        epPolymorphismTransformOpCodesFound = undefined;
         epRareBitOpCodesFound = undefined;
         epDirectCallTargets = undefined;
         epPopRegisterByAddress = undefined;
@@ -7193,6 +7256,39 @@ function scanForObfuscations_Native() {
     }
 
     if (!isNoncanonicalEpShiftPresent && isMixedEpBitOpsPresent) options = addOption(options, "Mixed bit ops near EP");
+
+
+
+
+    // Check for a transform-heavy cyclic entry-point graph characteristic of generated
+    // polymorphic dispatchers. No individual counter is trusted: stack traffic, calls,
+    // branching, a backward edge and uncommon transforms must all be independently present.
+
+    var isPolymorphicEpFlowPresent = false;
+
+    if (!PE_Cached.isDynamicLinkLibrary &&
+        epPolymorphismBranchCount >= epPolymorphismBranchRequiredCount &&
+        epPolymorphismBackwardControlFlowCount !== 0 &&
+        epPolymorphismCallCount >= epPolymorphismCallRequiredCount &&
+        epPolymorphismPushCount >= epPolymorphismPushRequiredCount &&
+        epPolymorphismPushCount - epPolymorphismPopCount >= epPolymorphismStackImbalanceRequiredCount &&
+        epPolymorphismTransformCount >= epPolymorphismTransformRequiredCount &&
+        epPolymorphismTransformKindCount >= epPolymorphismTransformKindRequiredCount &&
+        epPolymorphismDominantTransformCount * 2 <= epPolymorphismTransformCount &&
+        epPolymorphismPushCount + epPolymorphismTransformCount >= epPolymorphismDensityRequiredCount) {
+        // Independent minima keep every required behavior present. Unbalanced explicit stack
+        // traffic rejects ordinary callees, transformation diversity and distribution exclude
+        // fixed unpacking loops, and combined density rejects incidental mixtures.
+        log(logType.any, "Irregular ctrl flow near EP: branches/back: " +
+            epPolymorphismBranchCount + "/" + epPolymorphismBackwardControlFlowCount +
+            ", Call: " + epPolymorphismCallCount +
+            ", Push/Pop: " + epPolymorphismPushCount + "/" + epPolymorphismPopCount +
+            ", transforms/kinds/max: " + epPolymorphismTransformCount + "/" + epPolymorphismTransformKindCount + "/" + epPolymorphismDominantTransformCount);
+
+        isPolymorphicEpFlowPresent = true;
+    }
+
+    if (isPolymorphicEpFlowPresent) options = addOption(options, "Irregular ctrl flow near EP");
 
 
 
