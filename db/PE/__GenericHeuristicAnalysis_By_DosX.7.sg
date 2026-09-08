@@ -5251,7 +5251,15 @@ function scanForObfuscations_Native() {
                 "R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])",
             // This is a plain object: its dynamically added properties are configurable,
             // so delete object[key] is valid in strict mode.
-            syntheticEpKnownAddresses = {};
+            syntheticEpKnownAddresses = {},
+            // Compile invariant operand forms once; the state loop consumes the same
+            // architecture-specific grammar for every decoded instruction.
+            syntheticEpRegisterLiteralAddressPattern = new RegExp("^MOV(?:ABS)? (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i"),
+            syntheticEpPushedRegisterPattern = new RegExp("^PUSH (" + epGeneralPurposeRegister + ")$", "i"),
+            syntheticEpStoredRegisterPattern = new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i"),
+            syntheticEpPoppedRegisterPattern = new RegExp("^POP (" + epGeneralPurposeRegister + ")$", "i"),
+            syntheticEpExchangedRegisterPattern = new RegExp("^XCHG " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i"),
+            syntheticEpStoredAddressPattern = new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (0X[0-9A-F]+|\\d+)$", "i");
 
         // Two related states are tracked independently: known register VAs and the value
         // currently proven to occupy the top stack slot. RET matches only the latter.
@@ -5264,14 +5272,14 @@ function scanForObfuscations_Native() {
             if (!currentEpOpCode) break; // Safety check
 
             // Extract only register forms whose value can be followed without emulation.
-            var registerLiteralAddress = currentEpInstruction.match(new RegExp("^MOV(?:ABS)? (" + epGeneralPurposeRegister + "), (0X[0-9A-F]+|\\d+)$", "i")),
+            var registerLiteralAddress = currentEpInstruction.match(syntheticEpRegisterLiteralAddressPattern),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
-                pushedRegister = currentEpInstruction.match(new RegExp("^PUSH (" + epGeneralPurposeRegister + ")$", "i")),
-                storedRegister = currentEpInstruction.match(new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i")),
-                poppedRegister = currentEpInstruction.match(new RegExp("^POP (" + epGeneralPurposeRegister + ")$", "i")),
-                exchangedRegister = currentEpInstruction.match(new RegExp("^XCHG " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (" + syntheticEpStackTransferRegister + ")$", "i")),
+                pushedRegister = currentEpInstruction.match(syntheticEpPushedRegisterPattern),
+                storedRegister = currentEpInstruction.match(syntheticEpStoredRegisterPattern),
+                poppedRegister = currentEpInstruction.match(syntheticEpPoppedRegisterPattern),
+                exchangedRegister = currentEpInstruction.match(syntheticEpExchangedRegisterPattern),
                 pushedAddress = currentEpInstruction.match(/^PUSH (0X[0-9A-F]+|\d+)$/i),
-                storedAddress = currentEpInstruction.match(new RegExp("^MOV " + syntheticEpStackValueSize + " PTR \\[" + syntheticEpStackPointer + "\\], (0X[0-9A-F]+|\\d+)$", "i")),
+                storedAddress = currentEpInstruction.match(syntheticEpStoredAddressPattern),
                 stackPivotAddress = PE_Cached.isI386 ? currentEpInstruction.match(/^MOV ESP, (0X[0-9A-F]+|\d+)$/i) : null,
                 targetAddress = pushedAddress || storedAddress,
                 targetAddressValue = targetAddress ? parseInt(targetAddress[1], 0) : -1,
@@ -5419,7 +5427,13 @@ function scanForObfuscations_Native() {
             opaqueEpCarrySetNeverTakenBranches = ["JAE", "JNB", "JNC"],
             // Match -1 only at the operand's complete width. A shorter mask still fixes
             // CF/OF but leaves SF dependent on the original value and cannot use this profile.
-            opaqueEpAllOnesPattern = /^(?:OR ((?:AX|BX|CX|DX|SI|DI|BP|R(?:8|9|1[0-5])W)), (?:-1|0X0*FFFF|65535)|OR ((?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])D)), (?:-1|0X0*FFFFFFFF|4294967295)|OR (R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])), (?:-1|0X0*(?:FFFFFFFF|FFFFFFFFFFFFFFFF)|4294967295|18446744073709551615))$/i;
+            opaqueEpAllOnesPattern = /^(?:OR ((?:AX|BX|CX|DX|SI|DI|BP|R(?:8|9|1[0-5])W)), (?:-1|0X0*FFFF|65535)|OR ((?:E(?:AX|BX|CX|DX|SI|DI|BP)|R(?:8|9|1[0-5])D)), (?:-1|0X0*FFFFFFFF|4294967295)|OR (R(?:AX|BX|CX|DX|SI|DI|BP|8|9|1[0-5])), (?:-1|0X0*(?:FFFFFFFF|FFFFFFFFFFFFFFFF)|4294967295|18446744073709551615))$/i,
+            // These instruction forms are invariant across the entire fall-through scan.
+            opaqueEpZeroFlagsPattern = new RegExp("^(?:(?:XOR|SUB|CMP) (" + epFlagsGeneralPurposeRegister + "), \\1|AND (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+)|TEST (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+))$", "i"),
+            opaqueEpZeroLiteralPattern = new RegExp("^MOV (" + epGeneralPurposeRegister + "), (?:0X0+|0+)$", "i"),
+            opaqueEpZeroTestPattern = new RegExp("^(?:TEST|OR) (" + epGeneralPurposeRegister + "), \\1$", "i"),
+            opaqueEpRegisterWritePattern = new RegExp("^(?:MOV|MOVZX|MOVSX|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i"),
+            opaqueEpSelfMovePattern = new RegExp("^XCHG (" + epGeneralPurposeRegister + "), \\1$", "i");
 
         // Flags-preserving junk is allowed to make the check resilient to light polymorphism.
         var opaqueEpOriginInstruction = String(),
@@ -5443,18 +5457,18 @@ function scanForObfuscations_Native() {
 
             // Split each instruction into flag producers, value-provenance operations,
             // candidate consumers, and harmless padding before updating either fact set.
-            var zeroFlagsInstruction = currentEpInstruction.match(new RegExp("^(?:(?:XOR|SUB|CMP) (" + epFlagsGeneralPurposeRegister + "), \\1|AND (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+)|TEST (" + epFlagsGeneralPurposeRegister + "), (?:0X0+|0+))$", "i")),
+            var zeroFlagsInstruction = currentEpInstruction.match(opaqueEpZeroFlagsPattern),
                 allOnesFlagsInstruction = currentEpInstruction.match(opaqueEpAllOnesPattern),
                 carryFlagsInstruction = currentEpInstruction.match(/^(CLC|STC)$/),
-                zeroLiteralRegister = currentEpInstruction.match(new RegExp("^MOV (" + epGeneralPurposeRegister + "), (?:0X0+|0+)$", "i")),
-                zeroTestRegister = currentEpInstruction.match(new RegExp("^(?:TEST|OR) (" + epGeneralPurposeRegister + "), \\1$", "i")),
+                zeroLiteralRegister = currentEpInstruction.match(opaqueEpZeroLiteralPattern),
+                zeroTestRegister = currentEpInstruction.match(opaqueEpZeroTestPattern),
                 conditionalBranch = currentEpInstruction.match(epConditionalBranchPattern),
                 registerCopy = currentEpInstruction.match(epRegisterCopyPattern),
                 flagsNeutralRegisterWrite = currentEpInstruction.match(epFlagsNeutralRegisterWritePattern),
-                registerWrite = currentEpInstruction.match(new RegExp("^(?:MOV|MOVZX|MOVSX|LEA|XOR|ADD|SUB|ADC|SBB|AND|OR|NOT|NEG|INC|DEC|POP) (" + epGeneralPurposeRegister + ")(?:,|$)", "i")),
+                registerWrite = currentEpInstruction.match(opaqueEpRegisterWritePattern),
                 isNeutralInstruction = currentEpOpCode === "NOP" || currentEpOpCode === "FNOP" ||
                     currentEpOpCode === "PAUSE" ||
-                    new RegExp("^XCHG (" + epGeneralPurposeRegister + "), \\1$", "i").test(currentEpInstruction);
+                    opaqueEpSelfMovePattern.test(currentEpInstruction);
 
             if (zeroFlagsInstruction) {
                 // A zero result fixes CF, OF, SF, ZF, and PF regardless of the input value.
@@ -6652,6 +6666,7 @@ function scanForObfuscations_Native() {
         // The FIFO starts at EP. Visited addresses prevent loops, while the two call maps
         // retain only facts needed later by Call/Pop and self-modifying-stub validation.
         var epPolymorphismPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
+            epPolymorphismPendingAddressIndex = 0,
             epPolymorphismVisitedAddresses = {},
             epPolymorphismVisitedInstructionCount = 0,
             epPolymorphismTransformOpCodesFound = {},
@@ -6666,11 +6681,11 @@ function scanForObfuscations_Native() {
         }
 
         // Consume one reachable address at a time until the graph or global budget is exhausted.
-        while (epPolymorphismPendingAddresses.length !== 0 &&
+        while (epPolymorphismPendingAddressIndex < epPolymorphismPendingAddresses.length &&
             epPolymorphismVisitedInstructionCount < epPolymorphismInstructionLimit) {
-            var epPolymorphismCurrentAddress = epPolymorphismPendingAddresses.shift(),
+            var epPolymorphismCurrentAddress = epPolymorphismPendingAddresses[epPolymorphismPendingAddressIndex++],
                 epPolymorphismAddressKey = epPolymorphismCurrentAddress.toString(),
-                epPolymorphismCurrentRva = epPolymorphismCurrentAddress - PE.getImageBase(),
+                epPolymorphismCurrentRva = epPolymorphismCurrentAddress - PE_Cached.imageBase,
                 epPolymorphismSectionIndex = -1;
 
             // Skip loops and addresses which have no file-backed VA mapping.
@@ -7645,6 +7660,7 @@ function scanForObfuscations_Native() {
             } else if (PE_Cached.isArchX86) {
                 // Otherwise prove that reachable EP control flow enters the candidate section.
                 var protectedStartupPendingAddresses = [PE_Cached.addressOfUnmanagedEntryPoint],
+                    protectedStartupPendingAddressIndex = 0,
                     protectedStartupVisitedAddresses = {},
                     protectedStartupVisitedInstructionCount = 0;
 
@@ -7652,11 +7668,11 @@ function scanForObfuscations_Native() {
                 // Direct calls and conditional branches keep both the target and fall-through;
                 // an unconditional jump keeps only its target. The visited set handles loops, and
                 // the global instruction limit bounds deliberately dense polymorphic dispatchers.
-                while (protectedStartupPendingAddresses.length !== 0 &&
+                while (protectedStartupPendingAddressIndex < protectedStartupPendingAddresses.length &&
                     protectedStartupVisitedInstructionCount < 256 &&
                     !isUnderreportedStartupCodePresent) {
                     // Process one queued address and canonicalize it for loop detection.
-                    var protectedStartupCurrentAddress = protectedStartupPendingAddresses.shift(),
+                    var protectedStartupCurrentAddress = protectedStartupPendingAddresses[protectedStartupPendingAddressIndex++],
                         protectedStartupAddressKey = protectedStartupCurrentAddress.toString();
 
                     // Discard repeated and unmapped nodes before spending the instruction budget.
